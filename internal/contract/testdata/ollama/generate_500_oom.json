@@ -1,0 +1,10 @@
+{
+  "scenario": "generate_500_oom",
+  "request": {"method": "POST", "path": "/api/chat", "body_assertions": []},
+  "response": {
+    "status": 500,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"error\":\"out of memory\"}"
+  },
+  "expect": {"error_type": "TransientError"}
+}

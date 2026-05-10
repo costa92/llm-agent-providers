@@ -1,0 +1,10 @@
+{
+  "scenario": "generate_401_invalid_api_key",
+  "request": {"method": "POST", "path": "/chat/completions", "body_assertions": []},
+  "response": {
+    "status": 401,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"error\":{\"message\":\"Incorrect API key provided\",\"type\":\"invalid_request_error\",\"code\":\"invalid_api_key\"}}"
+  },
+  "expect": {"error_type": "AuthError"}
+}

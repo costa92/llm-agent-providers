@@ -7,6 +7,7 @@ require (
 	github.com/costa92/llm-agent v0.3.0-pre.2
 	github.com/ollama/ollama v0.23.2
 	github.com/openai/openai-go/v3 v3.35.0
+	go.uber.org/goleak v1.3.0
 )
 
 require (

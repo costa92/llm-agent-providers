@@ -1,0 +1,10 @@
+{
+  "scenario": "generate_500_server_error",
+  "request": {"method": "POST", "path": "/chat/completions", "body_assertions": []},
+  "response": {
+    "status": 500,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"error\":{\"message\":\"server error\",\"type\":\"server_error\",\"code\":\"server_error\"}}"
+  },
+  "expect": {"error_type": "TransientError"}
+}

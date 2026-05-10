@@ -1,0 +1,10 @@
+{
+  "scenario": "generate_404_model_not_pulled",
+  "request": {"method": "POST", "path": "/api/chat", "body_assertions": []},
+  "response": {
+    "status": 404,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"error\":\"model not found, try pulling it first\"}"
+  },
+  "expect": {"error_type": "InvalidRequestError"}
+}

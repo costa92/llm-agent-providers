@@ -16,6 +16,8 @@ coverage.html
 .env
 .env.*
 !.env.example
+**/.env
+internal/contract/testdata/**/*.local.json
 
 # Multi-repo workspace (Pitfall 13)
 go.work

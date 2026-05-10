@@ -1,0 +1,22 @@
+{
+  "scenario": "generate_happy_claude-3-5-haiku",
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "body_assertions": ["claude-3-5-haiku-20241022", "hello"]
+  },
+  "response": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-5-haiku-20241022\",\"content\":[{\"type\":\"text\",\"text\":\"Hello from Claude\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":11,\"output_tokens\":7}}"
+  },
+  "expect": {
+    "error_type": "",
+    "response_text": "Hello from Claude",
+    "finish_reason": "stop",
+    "usage_input_tokens": 11,
+    "usage_output_tokens": 7,
+    "usage_source": "reported",
+    "provider": "anthropic"
+  }
+}

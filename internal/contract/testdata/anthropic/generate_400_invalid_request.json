@@ -1,0 +1,10 @@
+{
+  "scenario": "generate_400_invalid_request",
+  "request": {"method": "POST", "path": "/v1/messages", "body_assertions": []},
+  "response": {
+    "status": 400,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"bad request\"}}"
+  },
+  "expect": {"error_type": "InvalidRequestError"}
+}

@@ -1,0 +1,10 @@
+{
+  "scenario": "generate_529_overloaded",
+  "request": {"method": "POST", "path": "/v1/messages", "body_assertions": []},
+  "response": {
+    "status": 529,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"overloaded\"}}"
+  },
+  "expect": {"error_type": "RateLimitError"}
+}

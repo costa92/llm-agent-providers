@@ -1,0 +1,10 @@
+{
+  "scenario": "generate_429_quota_exhausted",
+  "request": {"method": "POST", "path": "/chat/completions", "body_assertions": []},
+  "response": {
+    "status": 429,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"error\":{\"message\":\"You exceeded your current quota\",\"type\":\"insufficient_quota\",\"code\":\"insufficient_quota\"}}"
+  },
+  "expect": {"error_type": "RateLimitError"}
+}

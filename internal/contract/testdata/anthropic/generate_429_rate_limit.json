@@ -1,0 +1,10 @@
+{
+  "scenario": "generate_429_rate_limit",
+  "request": {"method": "POST", "path": "/v1/messages", "body_assertions": []},
+  "response": {
+    "status": 429,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"too many requests\"}}"
+  },
+  "expect": {"error_type": "RateLimitError"}
+}

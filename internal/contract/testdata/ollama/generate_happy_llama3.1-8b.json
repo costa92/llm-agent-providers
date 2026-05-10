@@ -1,0 +1,22 @@
+{
+  "scenario": "generate_happy_llama3.1-8b",
+  "request": {
+    "method": "POST",
+    "path": "/api/chat",
+    "body_assertions": ["llama3.1:8b", "\"stream\":false", "hello"]
+  },
+  "response": {
+    "status": 200,
+    "headers": {"Content-Type": "application/x-ndjson"},
+    "body": "{\"model\":\"llama3.1:8b\",\"created_at\":\"2026-05-10T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"Hello from Ollama\"},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":12,\"eval_count\":8}\n"
+  },
+  "expect": {
+    "error_type": "",
+    "response_text": "Hello from Ollama",
+    "finish_reason": "stop",
+    "usage_input_tokens": 12,
+    "usage_output_tokens": 8,
+    "usage_source": "reported",
+    "provider": "ollama"
+  }
+}

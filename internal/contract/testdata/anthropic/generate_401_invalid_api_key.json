@@ -1,0 +1,10 @@
+{
+  "scenario": "generate_401_invalid_api_key",
+  "request": {"method": "POST", "path": "/v1/messages", "body_assertions": []},
+  "response": {
+    "status": 401,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"bad key\"}}"
+  },
+  "expect": {"error_type": "AuthError"}
+}
