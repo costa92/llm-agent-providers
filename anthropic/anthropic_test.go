@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/costa92/llm-agent/llm"
@@ -40,17 +42,167 @@ func TestInfo_Anthropic(t *testing.T) {
 	}
 }
 
-func TestStream_AnthropicPhase1Stub(t *testing.T) {
-	m, err := New(WithModel("claude-3-5-haiku-20241022"), WithAPIKey("test-key"))
+func TestStream_Anthropic_Happy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-5-haiku-20241022\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":11,\"output_tokens\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello \"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"claude\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		_, _ = fmt.Fprint(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":\"\"},\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("claude-3-5-haiku-20241022"), WithAPIKey("test-key"), WithBaseURL(server.URL))
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
-	_, err = m.Stream(context.Background(), llm.Request{})
-	if err == nil {
-		t.Fatal("Stream() error = nil, want non-nil")
+
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
 	}
-	if err.Error() != "anthropic: streaming not implemented in Phase 1; use Generate" {
-		t.Fatalf("Stream() error = %q", err)
+
+	resp, err := llm.AccumulateStream(sr)
+	if err != nil {
+		t.Fatalf("AccumulateStream(): %v", err)
+	}
+	if resp.Text != "hello claude" {
+		t.Fatalf("Text = %q, want hello claude", resp.Text)
+	}
+	if resp.FinishReason != llm.FinishReasonStop {
+		t.Fatalf("FinishReason = %q, want %q", resp.FinishReason, llm.FinishReasonStop)
+	}
+	if resp.Usage.Source != llm.UsageReported {
+		t.Fatalf("Usage.Source = %q, want %q", resp.Usage.Source, llm.UsageReported)
+	}
+	if resp.Usage.InputTokens != 11 || resp.Usage.OutputTokens != 7 {
+		t.Fatalf("Usage = %+v, want input=11 output=7", resp.Usage)
+	}
+}
+
+func TestStream_Anthropic_PartialJSONFlushesOnContentBlockStop(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-5-haiku-20241022\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":9,\"output_tokens\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"checking \"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"weather\",\"input\":{},\"caller\":{\"type\":\"direct\"}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"city\\\":\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\" \\\"Paris\\\"}\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":\"\"},\"usage\":{\"input_tokens\":9,\"output_tokens\":5,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n")
+		_, _ = fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("claude-3-5-haiku-20241022"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	defer sr.Close()
+
+	ev1, err := sr.Next()
+	if err != nil {
+		t.Fatalf("Next#1: %v", err)
+	}
+	if ev1.Kind != llm.EventTextDelta || ev1.Text != "checking " {
+		t.Fatalf("Next#1 = %+v, want text delta", ev1)
+	}
+
+	ev2, err := sr.Next()
+	if err != nil {
+		t.Fatalf("Next#2: %v", err)
+	}
+	if ev2.Kind != llm.EventToolCallStart || ev2.ToolCall == nil || ev2.ToolCall.Index != 1 || ev2.ToolCall.ID != "toolu_1" || ev2.ToolCall.Name != "weather" {
+		t.Fatalf("Next#2 = %+v, want tool start for index 1", ev2)
+	}
+
+	ev3, err := sr.Next()
+	if err != nil {
+		t.Fatalf("Next#3: %v", err)
+	}
+	if ev3.Kind != llm.EventToolCallArgsDelta || ev3.ToolCall == nil || ev3.ToolCall.ArgsDelta != "{\"city\":" {
+		t.Fatalf("Next#3 = %+v, want first args delta", ev3)
+	}
+
+	ev4, err := sr.Next()
+	if err != nil {
+		t.Fatalf("Next#4: %v", err)
+	}
+	if ev4.Kind != llm.EventToolCallArgsDelta || ev4.ToolCall == nil || ev4.ToolCall.ArgsDelta != " \"Paris\"}" {
+		t.Fatalf("Next#4 = %+v, want second args delta", ev4)
+	}
+
+	ev5, err := sr.Next()
+	if err != nil {
+		t.Fatalf("Next#5: %v", err)
+	}
+	if ev5.Kind != llm.EventToolCallEnd || ev5.ToolCall == nil || ev5.ToolCall.Index != 1 {
+		t.Fatalf("Next#5 = %+v, want tool end after content_block_stop", ev5)
+	}
+
+	ev6, err := sr.Next()
+	if err != nil {
+		t.Fatalf("Next#6: %v", err)
+	}
+	if ev6.Kind != llm.EventDone || ev6.Usage == nil || ev6.FinishReason != llm.FinishReasonToolCalls {
+		t.Fatalf("Next#6 = %+v, want done/toolcalls", ev6)
+	}
+}
+
+func TestStream_Anthropic_DoesNotRetryAfterFirstByte(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-5-haiku-20241022\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":3,\"output_tokens\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"par\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"stream interrupted\"}}\n\n")
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("claude-3-5-haiku-20241022"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	defer sr.Close()
+
+	ev, err := sr.Next()
+	if err != nil {
+		t.Fatalf("Next#1: %v", err)
+	}
+	if ev.Kind != llm.EventTextDelta || ev.Text != "par" {
+		t.Fatalf("Next#1 = %+v, want text delta par", ev)
+	}
+
+	_, err = sr.Next()
+	if err == nil {
+		t.Fatal("Next#2 error = nil, want non-nil")
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("attempts = %d, want 1", got)
 	}
 }
 
