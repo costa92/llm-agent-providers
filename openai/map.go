@@ -34,6 +34,14 @@ func (o *OpenAI) toSDKRequest(req llm.Request) openai.ChatCompletionNewParams {
 	return p
 }
 
+func (o *OpenAI) toSDKStreamRequest(req llm.Request) openai.ChatCompletionNewParams {
+	p := o.toSDKRequest(req)
+	p.StreamOptions = openai.ChatCompletionStreamOptionsParam{
+		IncludeUsage: openai.Bool(true),
+	}
+	return p
+}
+
 func (o *OpenAI) fromSDKResponse(c *openai.ChatCompletion) llm.Response {
 	var text string
 	if len(c.Choices) > 0 {

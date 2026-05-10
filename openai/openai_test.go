@@ -3,9 +3,12 @@ package openai
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/costa92/llm-agent/llm"
@@ -38,17 +41,135 @@ func TestInfo_OpenAI(t *testing.T) {
 	}
 }
 
-func TestStream_OpenAIPhase1Stub(t *testing.T) {
-	m, err := New(WithModel("gpt-4o-mini"), WithAPIKey("test-key"))
+func TestStream_OpenAI_Happy(t *testing.T) {
+	var sawIncludeUsage atomic.Bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"include_usage":true`) {
+			sawIncludeUsage.Store(true)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"},\"finish_reason\":\"\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"gpt-4o-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("gpt-4o-mini"), WithAPIKey("test-key"), WithBaseURL(server.URL))
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
-	_, err = m.Stream(context.Background(), llm.Request{})
-	if err == nil {
-		t.Fatal("Stream() error = nil, want non-nil")
+
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "say hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
 	}
-	if err.Error() != "openai: streaming not implemented in Phase 1; use Generate" {
-		t.Fatalf("Stream() error = %q", err)
+
+	resp, err := llm.AccumulateStream(sr)
+	if err != nil {
+		t.Fatalf("AccumulateStream(): %v", err)
+	}
+	if resp.Text != "hello" {
+		t.Fatalf("Text = %q, want hello", resp.Text)
+	}
+	if resp.FinishReason != llm.FinishReasonStop {
+		t.Fatalf("FinishReason = %q, want %q", resp.FinishReason, llm.FinishReasonStop)
+	}
+	if resp.Usage.Source != llm.UsageReported {
+		t.Fatalf("Usage.Source = %q, want %q", resp.Usage.Source, llm.UsageReported)
+	}
+	if resp.Usage.InputTokens != 11 || resp.Usage.OutputTokens != 7 || resp.Usage.TotalTokens != 18 {
+		t.Fatalf("Usage = %+v, want prompt=11 completion=7 total=18", resp.Usage)
+	}
+	if !sawIncludeUsage.Load() {
+		t.Fatal(`request body missing "stream_options.include_usage=true"`)
+	}
+}
+
+func TestStream_OpenAI_RetriesBeforeFirstByte(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := attempts.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if n == 1 {
+			_, _ = fmt.Fprint(w, "data: {\"error\":{\"message\":\"upstream exploded\"}}\n\n")
+			return
+		}
+
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"gpt-4o-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("gpt-4o-mini"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+
+	resp, err := llm.AccumulateStream(sr)
+	if err != nil {
+		t.Fatalf("AccumulateStream(): %v", err)
+	}
+	if resp.Text != "ok" {
+		t.Fatalf("Text = %q, want ok", resp.Text)
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("attempts = %d, want 2", got)
+	}
+}
+
+func TestStream_OpenAI_DoesNotRetryAfterFirstByte(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"par\"},\"finish_reason\":\"\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"error\":{\"message\":\"stream interrupted\"}}\n\n")
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("gpt-4o-mini"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	defer sr.Close()
+
+	ev, err := sr.Next()
+	if err != nil {
+		t.Fatalf("Next#1: %v", err)
+	}
+	if ev.Kind != llm.EventTextDelta || ev.Text != "par" {
+		t.Fatalf("Next#1 = %+v, want text delta par", ev)
+	}
+
+	_, err = sr.Next()
+	if err == nil {
+		t.Fatal("Next#2 error = nil, want non-nil")
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("attempts = %d, want 1", got)
 	}
 }
 
