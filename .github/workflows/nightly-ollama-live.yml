@@ -1,0 +1,47 @@
+# OLL-08: nightly conformance against a real Ollama container.
+# This stays out of PR CI via non-PR triggers plus the ollama_live build tag.
+name: nightly-ollama-live
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-ollama-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOWORK: off
+  OLLAMA_TC_IMAGE: ollama/ollama:0.5.7
+  OLLAMA_TC_MODEL: llama3.1:8b-instruct-q4_K_M
+
+jobs:
+  ollama-live-conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache Ollama model volume
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ollama
+          key: ollama-${{ env.OLLAMA_TC_IMAGE }}-${{ env.OLLAMA_TC_MODEL }}
+          restore-keys: |
+            ollama-${{ env.OLLAMA_TC_IMAGE }}-
+
+      - name: Verify Docker available
+        run: docker info | head -3
+
+      - name: Run conformance suite against testcontainer Ollama
+        run: |
+          go test -v -timeout 30m \
+            -tags ollama_live \
+            -run TestGenerate_Ollama_Live \
+            ./internal/contract/...
