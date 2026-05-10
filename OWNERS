@@ -1,0 +1,15 @@
+# OWNERS — github.com/costa92/llm-agent-providers
+#
+# Code review and approval for the Go LLM agents framework's provider adapters
+# (OpenAI / Anthropic / Ollama).
+#
+# Format: https://www.kubernetes.io/docs/contribute/participate/roles-and-responsibilities/
+
+approvers:
+  - costa92
+
+reviewers:
+  - costa92
+
+labels:
+  - area/providers
