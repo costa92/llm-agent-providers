@@ -31,6 +31,13 @@ func (o *Ollama) toSDKRequest(req llm.Request) *api.ChatRequest {
 	return p
 }
 
+func (o *Ollama) toSDKStreamRequest(req llm.Request) *api.ChatRequest {
+	streamOn := true
+	p := o.toSDKRequest(req)
+	p.Stream = &streamOn
+	return p
+}
+
 func (o *Ollama) fromSDKResponse(resp api.ChatResponse) llm.Response {
 	return llm.Response{
 		Text:         resp.Message.Content,

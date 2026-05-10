@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/costa92/llm-agent/llm"
 )
@@ -40,17 +42,100 @@ func TestInfo_Ollama(t *testing.T) {
 	}
 }
 
-func TestStream_OllamaPhase1Stub(t *testing.T) {
-	m, err := New(WithModel("llama3.1:8b"), WithBaseURL("http://localhost:11434"))
+func TestStream_Ollama_Happy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(readBody(t, r), `"stream":true`) {
+			t.Fatal("request body missing stream=true")
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"llama3.1:8b","created_at":"2026-05-10T00:00:00Z","message":{"role":"assistant","content":"hel"},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"model":"llama3.1:8b","created_at":"2026-05-10T00:00:00Z","message":{"role":"assistant","content":"lo"},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"model":"llama3.1:8b","created_at":"2026-05-10T00:00:00Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":12,"eval_count":8}` + "\n"))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("llama3.1:8b"), WithBaseURL(server.URL))
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
-	_, err = m.Stream(context.Background(), llm.Request{})
-	if err == nil {
-		t.Fatal("Stream() error = nil, want non-nil")
+
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
 	}
-	if err.Error() != "ollama: streaming not implemented in Phase 1; use Generate" {
-		t.Fatalf("Stream() error = %q", err)
+
+	resp, err := llm.AccumulateStream(sr)
+	if err != nil {
+		t.Fatalf("AccumulateStream(): %v", err)
+	}
+	if resp.Text != "hello" {
+		t.Fatalf("Text = %q, want hello", resp.Text)
+	}
+	if resp.FinishReason != llm.FinishReasonStop {
+		t.Fatalf("FinishReason = %q, want %q", resp.FinishReason, llm.FinishReasonStop)
+	}
+	if resp.Usage.Source != llm.UsageReported {
+		t.Fatalf("Usage.Source = %q, want %q", resp.Usage.Source, llm.UsageReported)
+	}
+	if resp.Usage.InputTokens != 12 || resp.Usage.OutputTokens != 8 || resp.Usage.TotalTokens != 20 {
+		t.Fatalf("Usage = %+v, want prompt=12 completion=8 total=20", resp.Usage)
+	}
+}
+
+func TestStream_Ollama_CancelMidStream(t *testing.T) {
+	release := make(chan struct{})
+	var wroteFirst atomic.Bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer missing Flusher")
+		}
+		_, _ = w.Write([]byte(`{"model":"llama3.1:8b","created_at":"2026-05-10T00:00:00Z","message":{"role":"assistant","content":"par"},"done":false}` + "\n"))
+		flusher.Flush()
+		wroteFirst.Store(true)
+		<-release
+		_, _ = w.Write([]byte(`{"model":"llama3.1:8b","created_at":"2026-05-10T00:00:00Z","message":{"role":"assistant","content":"tial"},"done":false}` + "\n"))
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m, err := New(WithModel("llama3.1:8b"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	sr, err := m.Stream(ctx, llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	defer sr.Close()
+
+	ev, err := sr.Next()
+	if err != nil {
+		t.Fatalf("Next#1: %v", err)
+	}
+	if ev.Kind != llm.EventTextDelta || ev.Text != "par" {
+		t.Fatalf("Next#1 = %+v, want text delta par", ev)
+	}
+	if !wroteFirst.Load() {
+		t.Fatal("first chunk not observed")
+	}
+
+	cancel()
+	close(release)
+	start := time.Now()
+	_, err = sr.Next()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Next#2 error = %v, want context.Canceled", err)
+	}
+	if d := time.Since(start); d > 100*time.Millisecond {
+		t.Fatalf("cancel latency = %s, want <= 100ms", d)
 	}
 }
 
