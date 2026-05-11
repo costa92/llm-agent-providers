@@ -65,6 +65,11 @@ func New(opts ...Option) (*OpenAI, error) {
 	}
 
 	client := openai.NewClient(sdkOpts...)
+	embeddings := false
+	switch cfg.model {
+	case "text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002":
+		embeddings = true
+	}
 	return &OpenAI{
 		client: &client,
 		info: llm.ProviderInfo{
@@ -72,7 +77,7 @@ func New(opts ...Option) (*OpenAI, error) {
 			Model:    cfg.model,
 			Capabilities: llm.Capabilities{
 				Tools:             true,
-				Embeddings:        false,
+				Embeddings:        embeddings,
 				StructuredOutputs: false,
 				PromptCaching:     false,
 			},

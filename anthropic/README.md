@@ -6,7 +6,14 @@ Current scope:
 
 - `llm.ChatModel.Generate`
 - `Info()` with model-bound provider metadata
-- `Stream()` Phase 1 stub
+- `Stream()` with native event mapping
+- native tool calling
+
+Deliberate capability gap:
+
+- embeddings are not implemented
+- `Info().Capabilities.Embeddings` is always `false`
+- callers should branch on capability detection and/or `errors.Is(err, llm.ErrCapabilityNotSupported)`
 
 Anthropic-specific Phase 1 behavior:
 

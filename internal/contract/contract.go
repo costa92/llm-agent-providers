@@ -39,6 +39,8 @@ type Fixture struct {
 		UsageOutputTokens int    `json:"usage_output_tokens,omitempty"`
 		UsageSource       string `json:"usage_source,omitempty"`
 		Provider          string `json:"provider,omitempty"`
+		EmbeddingCount    int    `json:"embedding_count,omitempty"`
+		EmbeddingDims     []int  `json:"embedding_dims,omitempty"`
 		ToolCalls         []struct {
 			ID        string `json:"id,omitempty"`
 			Name      string `json:"name"`
@@ -155,6 +157,43 @@ func AssertToolCalling(t *testing.T, model llm.ChatModel, f Fixture) {
 	}
 	resp, err := bound.Generate(t.Context(), req)
 	assertResponse(t, resp, err, f, "Generate")
+}
+
+func AssertEmbed(t *testing.T, model llm.ChatModel, f Fixture) {
+	t.Helper()
+	embedder, ok := model.(llm.Embedder)
+	if f.Expect.ErrorType == "CapabilityNotSupported" {
+		if ok {
+			t.Fatalf("model %T unexpectedly implements llm.Embedder", model)
+		}
+		return
+	}
+	if !ok {
+		t.Fatalf("model %T does not implement llm.Embedder", model)
+	}
+	vectors, usage, err := embedder.Embed(t.Context(), []string{"hello", "world"})
+	if err != nil {
+		t.Fatalf("Embed: unexpected error: %v", err)
+	}
+	if f.Expect.EmbeddingCount != 0 && len(vectors) != f.Expect.EmbeddingCount {
+		t.Fatalf("embedding count: got %d want %d", len(vectors), f.Expect.EmbeddingCount)
+	}
+	if len(f.Expect.EmbeddingDims) != 0 {
+		if len(vectors) != len(f.Expect.EmbeddingDims) {
+			t.Fatalf("embedding dims len: got %d vectors want %d dim assertions", len(vectors), len(f.Expect.EmbeddingDims))
+		}
+		for i, want := range f.Expect.EmbeddingDims {
+			if got := len(vectors[i]); got != want {
+				t.Fatalf("embedding[%d] dim: got %d want %d", i, got, want)
+			}
+		}
+	}
+	if f.Expect.UsageInputTokens != 0 && usage.InputTokens != f.Expect.UsageInputTokens {
+		t.Fatalf("Usage.InputTokens: got %d want %d", usage.InputTokens, f.Expect.UsageInputTokens)
+	}
+	if f.Expect.UsageSource != "" && string(usage.Source) != f.Expect.UsageSource {
+		t.Fatalf("Usage.Source: got %q want %q", usage.Source, f.Expect.UsageSource)
+	}
 }
 
 func assertResponse(t *testing.T, resp llm.Response, err error, f Fixture, op string) {

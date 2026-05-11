@@ -42,6 +42,71 @@ func TestInfo_OpenAI(t *testing.T) {
 	}
 }
 
+func TestInfo_OpenAI_EmbeddingModel(t *testing.T) {
+	m, err := New(WithModel("text-embedding-3-small"), WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	info := m.Info()
+	if !info.Capabilities.Embeddings {
+		t.Fatalf("Capabilities = %+v, want embeddings=true", info.Capabilities)
+	}
+	if got := m.EmbedDimensions(); got != 1536 {
+		t.Fatalf("EmbedDimensions() = %d, want 1536", got)
+	}
+}
+
+func TestEmbed_OpenAI_Happy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		body := string(bodyBytes)
+		if r.Method != http.MethodPost {
+			t.Fatalf("Method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/embeddings" {
+			t.Fatalf("Path = %s, want /embeddings", r.URL.Path)
+		}
+		if !strings.Contains(body, `"model":"text-embedding-3-small"`) {
+			t.Fatalf("request body missing embedding model: %s", body)
+		}
+		if !strings.Contains(body, `"input":["hello","world"]`) {
+			t.Fatalf("request body missing batch input order: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"object":"list",
+			"model":"text-embedding-3-small",
+			"data":[
+				{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]},
+				{"object":"embedding","index":1,"embedding":[0.4,0.5,0.6]}
+			],
+			"usage":{"prompt_tokens":7,"total_tokens":7}
+		}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("text-embedding-3-small"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	vectors, usage, err := m.Embed(context.Background(), []string{"hello", "world"})
+	if err != nil {
+		t.Fatalf("Embed(): %v", err)
+	}
+	if len(vectors) != 2 {
+		t.Fatalf("len(vectors) = %d, want 2", len(vectors))
+	}
+	if len(vectors[0]) != 3 || len(vectors[1]) != 3 {
+		t.Fatalf("vector dims = [%d %d], want [3 3]", len(vectors[0]), len(vectors[1]))
+	}
+	if usage.Source != llm.UsageReported || usage.InputTokens != 7 || usage.TotalTokens != 7 {
+		t.Fatalf("usage = %+v, want reported prompt=7 total=7", usage)
+	}
+}
+
 func TestWithTools_OpenAI_ImmutableAndIndependent(t *testing.T) {
 	var calcSeen atomic.Int32
 	var searchSeen atomic.Int32

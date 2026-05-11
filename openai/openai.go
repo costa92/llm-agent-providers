@@ -14,6 +14,7 @@ import (
 var (
 	_ llm.ChatModel  = (*OpenAI)(nil)
 	_ llm.ToolCaller = (*OpenAI)(nil)
+	_ llm.Embedder   = (*OpenAI)(nil)
 )
 
 type OpenAI struct {
@@ -46,6 +47,50 @@ func (o *OpenAI) WithTools(tools []llm.Tool) (llm.ToolCaller, error) {
 	cp := *o
 	cp.tools = append([]llm.Tool(nil), tools...)
 	return &cp, nil
+}
+
+func (o *OpenAI) Embed(ctx context.Context, texts []string) ([]llm.Vector, llm.Usage, error) {
+	if len(texts) == 0 {
+		return []llm.Vector{}, llm.Usage{Source: llm.UsageReported}, nil
+	}
+	resp, err := o.client.Embeddings.New(ctx, openai.EmbeddingNewParams{
+		Model: openai.EmbeddingModel(o.info.Model),
+		Input: openai.EmbeddingNewParamsInputUnion{
+			OfArrayOfStrings: append([]string(nil), texts...),
+		},
+		EncodingFormat: openai.EmbeddingNewParamsEncodingFormatFloat,
+	})
+	if err != nil {
+		return nil, llm.Usage{}, wrapErr(err)
+	}
+	vectors := make([]llm.Vector, 0, len(resp.Data))
+	for _, item := range resp.Data {
+		vec := make(llm.Vector, 0, len(item.Embedding))
+		for _, f := range item.Embedding {
+			vec = append(vec, float32(f))
+		}
+		vectors = append(vectors, vec)
+	}
+	usage := llm.Usage{
+		InputTokens:  int(resp.Usage.PromptTokens),
+		OutputTokens: 0,
+		TotalTokens:  int(resp.Usage.TotalTokens),
+		Source:       llm.UsageReported,
+	}
+	return vectors, usage, nil
+}
+
+func (o *OpenAI) EmbedDimensions() int {
+	switch o.info.Model {
+	case "text-embedding-3-small":
+		return 1536
+	case "text-embedding-3-large":
+		return 3072
+	case "text-embedding-ada-002":
+		return 1536
+	default:
+		return 0
+	}
 }
 
 type openaiStreamReader struct {

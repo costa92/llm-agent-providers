@@ -72,6 +72,7 @@ func New(opts ...Option) (*Ollama, error) {
 
 	lastStatus := new(int32)
 	strategy := strategyForModel(cfg.model)
+	embedDim := embeddingDimensionForModel(cfg.model)
 	httpClient := cfg.httpClient
 	if httpClient == nil {
 		httpClient = &http.Client{}
@@ -101,7 +102,7 @@ func New(opts ...Option) (*Ollama, error) {
 			Model:    cfg.model,
 			Capabilities: llm.Capabilities{
 				Tools:             strategy.supportsTool,
-				Embeddings:        false,
+				Embeddings:        embedDim > 0,
 				StructuredOutputs: false,
 				PromptCaching:     false,
 			},

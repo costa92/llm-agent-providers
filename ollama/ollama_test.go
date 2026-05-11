@@ -42,6 +42,77 @@ func TestInfo_Ollama(t *testing.T) {
 	}
 }
 
+func TestInfo_Ollama_EmbeddingModel(t *testing.T) {
+	m, err := New(WithModel("nomic-embed-text"), WithBaseURL("http://localhost:11434"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	info := m.Info()
+	if !info.Capabilities.Embeddings {
+		t.Fatalf("Capabilities = %+v, want embeddings=true", info.Capabilities)
+	}
+	if got := m.EmbedDimensions(); got != 768 {
+		t.Fatalf("EmbedDimensions() = %d, want 768", got)
+	}
+}
+
+func TestEmbed_Ollama_Happy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("Method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/embed" {
+			t.Fatalf("Path = %s, want /api/embed", r.URL.Path)
+		}
+		body := readBody(t, r)
+		if !strings.Contains(body, `"model":"nomic-embed-text"`) {
+			t.Fatalf("request body missing embedding model: %s", body)
+		}
+		if !strings.Contains(body, `"input":["hello","world"]`) {
+			t.Fatalf("request body missing batch input order: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"nomic-embed-text",
+			"embeddings":[[0.1,0.2,0.3],[0.4,0.5,0.6]],
+			"prompt_eval_count":9
+		}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("nomic-embed-text"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	vectors, usage, err := m.Embed(context.Background(), []string{"hello", "world"})
+	if err != nil {
+		t.Fatalf("Embed(): %v", err)
+	}
+	if len(vectors) != 2 {
+		t.Fatalf("len(vectors) = %d, want 2", len(vectors))
+	}
+	if len(vectors[0]) != 3 || len(vectors[1]) != 3 {
+		t.Fatalf("vector dims = [%d %d], want [3 3]", len(vectors[0]), len(vectors[1]))
+	}
+	if usage.Source != llm.UsageReported || usage.InputTokens != 9 || usage.TotalTokens != 9 {
+		t.Fatalf("usage = %+v, want reported prompt=9 total=9", usage)
+	}
+}
+
+func TestEmbed_Ollama_UnsupportedModel(t *testing.T) {
+	m, err := New(WithModel("llama3.1:8b"), WithBaseURL("http://localhost:11434"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, _, err = m.Embed(context.Background(), []string{"hello"})
+	if !errors.Is(err, llm.ErrCapabilityNotSupported) {
+		t.Fatalf("errors.Is(err, ErrCapabilityNotSupported) = false, err=%v", err)
+	}
+	if !strings.Contains(err.Error(), "ProviderInfo.Capabilities.Embeddings=false") {
+		t.Fatalf("error = %q, want capability truth hint", err)
+	}
+}
+
 func TestInfo_Ollama_UnsupportedModel(t *testing.T) {
 	m, err := New(WithModel("llama2"), WithBaseURL("http://localhost:11434"))
 	if err != nil {

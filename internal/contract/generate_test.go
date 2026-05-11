@@ -40,6 +40,29 @@ var AdapterFactories = map[string]ChatModelFactory{
 	},
 }
 
+var EmbeddingAdapterFactories = map[string]ChatModelFactory{
+	"openai": func(baseURL string) (llm.ChatModel, error) {
+		return openai.New(
+			openai.WithModel("text-embedding-3-small"),
+			openai.WithAPIKey("test"),
+			openai.WithBaseURL(baseURL),
+		)
+	},
+	"anthropic": func(baseURL string) (llm.ChatModel, error) {
+		return anthropic.New(
+			anthropic.WithModel("claude-3-5-haiku-20241022"),
+			anthropic.WithAPIKey("test"),
+			anthropic.WithBaseURL(baseURL),
+		)
+	},
+	"ollama": func(baseURL string) (llm.ChatModel, error) {
+		return ollama.New(
+			ollama.WithModel("nomic-embed-text"),
+			ollama.WithBaseURL(baseURL),
+		)
+	},
+}
+
 func TestGenerate_Conformance(t *testing.T) {
 	cases := []struct {
 		provider string
@@ -151,6 +174,40 @@ func TestToolCalling_CapabilityDegrade_Ollama(t *testing.T) {
 		{Name: "calculator", Parameters: `{"type":"object","properties":{"expr":{"type":"string"}}}`},
 	}
 	AssertToolCalling(t, model, f)
+}
+
+func TestEmbed_Conformance(t *testing.T) {
+	cases := []struct {
+		provider string
+		scenario string
+	}{
+		{"openai", "embed_happy_text-embedding-3-small"},
+		{"ollama", "embed_happy_nomic-embed-text"},
+		{"anthropic", "embed_not_supported_claude-3-5-haiku"},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.provider+"/"+c.scenario, func(t *testing.T) {
+			t.Parallel()
+			f := LoadFixture(t, c.provider, c.scenario)
+			if c.provider != "anthropic" {
+				srv := NewMockServer(t, f)
+				t.Cleanup(srv.Close)
+				model, err := EmbeddingAdapterFactories[c.provider](srv.URL)
+				if err != nil {
+					t.Fatalf("factory: %v", err)
+				}
+				AssertEmbed(t, model, f)
+				return
+			}
+			model, err := EmbeddingAdapterFactories[c.provider]("http://localhost:1")
+			if err != nil {
+				t.Fatalf("factory: %v", err)
+			}
+			AssertEmbed(t, model, f)
+		})
+	}
 }
 
 func TestToolCalling_DedupeKey(t *testing.T) {

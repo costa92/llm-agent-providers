@@ -1,0 +1,20 @@
+{
+  "scenario": "embed_happy_text-embedding-3-small",
+  "request": {
+    "method": "POST",
+    "path": "/embeddings",
+    "body_assertions": ["text-embedding-3-small", "\"input\":[\"hello\",\"world\"]"]
+  },
+  "response": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"object\":\"list\",\"model\":\"text-embedding-3-small\",\"data\":[{\"object\":\"embedding\",\"index\":0,\"embedding\":[0.1,0.2,0.3]},{\"object\":\"embedding\",\"index\":1,\"embedding\":[0.4,0.5,0.6]}],\"usage\":{\"prompt_tokens\":7,\"total_tokens\":7}}"
+  },
+  "expect": {
+    "error_type": "",
+    "usage_input_tokens": 7,
+    "usage_source": "reported",
+    "embedding_count": 2,
+    "embedding_dims": [3, 3]
+  }
+}

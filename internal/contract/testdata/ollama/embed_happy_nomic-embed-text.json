@@ -1,0 +1,20 @@
+{
+  "scenario": "embed_happy_nomic-embed-text",
+  "request": {
+    "method": "POST",
+    "path": "/api/embed",
+    "body_assertions": ["nomic-embed-text", "\"input\":[\"hello\",\"world\"]"]
+  },
+  "response": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"model\":\"nomic-embed-text\",\"embeddings\":[[0.1,0.2,0.3],[0.4,0.5,0.6]],\"prompt_eval_count\":9}"
+  },
+  "expect": {
+    "error_type": "",
+    "usage_input_tokens": 9,
+    "usage_source": "reported",
+    "embedding_count": 2,
+    "embedding_dims": [3, 3]
+  }
+}

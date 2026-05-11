@@ -1,0 +1,16 @@
+{
+  "scenario": "embed_not_supported_claude-3-5-haiku",
+  "request": {
+    "method": "",
+    "path": "",
+    "body_assertions": []
+  },
+  "response": {
+    "status": 0,
+    "headers": {},
+    "body": ""
+  },
+  "expect": {
+    "error_type": "CapabilityNotSupported"
+  }
+}

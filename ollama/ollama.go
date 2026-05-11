@@ -12,6 +12,7 @@ import (
 var (
 	_ llm.ChatModel  = (*Ollama)(nil)
 	_ llm.ToolCaller = (*Ollama)(nil)
+	_ llm.Embedder   = (*Ollama)(nil)
 )
 
 type Ollama struct {
@@ -71,6 +72,39 @@ func (o *Ollama) WithTools(tools []llm.Tool) (llm.ToolCaller, error) {
 	cp := *o
 	cp.tools = append([]llm.Tool(nil), tools...)
 	return &cp, nil
+}
+
+func (o *Ollama) Embed(ctx context.Context, texts []string) ([]llm.Vector, llm.Usage, error) {
+	if !o.info.Capabilities.Embeddings {
+		return nil, llm.Usage{}, unsupportedEmbeddingError(o.info.Model)
+	}
+	if len(texts) == 0 {
+		return []llm.Vector{}, llm.Usage{Source: llm.UsageReported}, nil
+	}
+	resp, err := o.client.Embed(ctx, &api.EmbedRequest{
+		Model: o.info.Model,
+		Input: append([]string(nil), texts...),
+	})
+	if err != nil {
+		return nil, llm.Usage{}, o.wrapErr(err)
+	}
+	vectors := make([]llm.Vector, 0, len(resp.Embeddings))
+	for _, item := range resp.Embeddings {
+		vec := make(llm.Vector, len(item))
+		copy(vec, item)
+		vectors = append(vectors, vec)
+	}
+	usage := llm.Usage{
+		InputTokens:  resp.PromptEvalCount,
+		OutputTokens: 0,
+		TotalTokens:  resp.PromptEvalCount,
+		Source:       llm.UsageReported,
+	}
+	return vectors, usage, nil
+}
+
+func (o *Ollama) EmbedDimensions() int {
+	return embeddingDimensionForModel(o.info.Model)
 }
 
 type ollamaStreamReader struct {

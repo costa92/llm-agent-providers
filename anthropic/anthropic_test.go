@@ -42,6 +42,20 @@ func TestInfo_Anthropic(t *testing.T) {
 	}
 }
 
+func TestAnthropic_DocumentedEmbeddingGap(t *testing.T) {
+	m, err := New(WithModel("claude-3-5-haiku-20241022"), WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	info := m.Info()
+	if info.Capabilities.Embeddings {
+		t.Fatalf("Capabilities = %+v, want embeddings=false", info.Capabilities)
+	}
+	if _, ok := any(m).(llm.Embedder); ok {
+		t.Fatal("Anthropic adapter must not implement llm.Embedder")
+	}
+}
+
 func TestWithTools_Anthropic_ImmutableAndRequestShape(t *testing.T) {
 	var weatherSeen atomic.Int32
 	var calcSeen atomic.Int32
