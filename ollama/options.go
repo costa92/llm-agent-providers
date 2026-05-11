@@ -71,6 +71,7 @@ func New(opts ...Option) (*Ollama, error) {
 	}
 
 	lastStatus := new(int32)
+	strategy := strategyForModel(cfg.model)
 	httpClient := cfg.httpClient
 	if httpClient == nil {
 		httpClient = &http.Client{}
@@ -94,11 +95,12 @@ func New(opts ...Option) (*Ollama, error) {
 	return &Ollama{
 		client:     client,
 		lastStatus: lastStatus,
+		strategy:   strategy,
 		info: llm.ProviderInfo{
 			Provider: "ollama",
 			Model:    cfg.model,
 			Capabilities: llm.Capabilities{
-				Tools:             false,
+				Tools:             strategy.supportsTool,
 				Embeddings:        false,
 				StructuredOutputs: false,
 				PromptCaching:     false,

@@ -9,12 +9,17 @@ import (
 	api "github.com/ollama/ollama/api"
 )
 
-var _ llm.ChatModel = (*Ollama)(nil)
+var (
+	_ llm.ChatModel  = (*Ollama)(nil)
+	_ llm.ToolCaller = (*Ollama)(nil)
+)
 
 type Ollama struct {
 	client     *api.Client
 	info       llm.ProviderInfo
 	lastStatus *int32
+	tools      []llm.Tool
+	strategy   ollamaToolStrategy
 }
 
 func (o *Ollama) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
@@ -58,6 +63,15 @@ func (o *Ollama) Stream(ctx context.Context, req llm.Request) (llm.StreamReader,
 }
 
 func (o *Ollama) Info() llm.ProviderInfo { return o.info }
+
+func (o *Ollama) WithTools(tools []llm.Tool) (llm.ToolCaller, error) {
+	if !o.strategy.supportsTool {
+		return nil, unsupportedToolError(o.info.Model)
+	}
+	cp := *o
+	cp.tools = append([]llm.Tool(nil), tools...)
+	return &cp, nil
+}
 
 type ollamaStreamReader struct {
 	mu     sync.Mutex

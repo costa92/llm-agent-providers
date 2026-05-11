@@ -37,8 +37,19 @@ func TestInfo_Ollama(t *testing.T) {
 	if info.Model != "llama3.1:8b" {
 		t.Fatalf("Model = %q, want llama3.1:8b", info.Model)
 	}
-	if info.Capabilities.Tools || info.Capabilities.Embeddings || info.Capabilities.StructuredOutputs || info.Capabilities.PromptCaching {
-		t.Fatalf("Capabilities = %+v, want all false", info.Capabilities)
+	if !info.Capabilities.Tools || info.Capabilities.Embeddings || info.Capabilities.StructuredOutputs || info.Capabilities.PromptCaching {
+		t.Fatalf("Capabilities = %+v, want tools=true and others=false", info.Capabilities)
+	}
+}
+
+func TestInfo_Ollama_UnsupportedModel(t *testing.T) {
+	m, err := New(WithModel("llama2"), WithBaseURL("http://localhost:11434"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	info := m.Info()
+	if info.Capabilities.Tools {
+		t.Fatalf("Capabilities = %+v, want tools=false", info.Capabilities)
 	}
 }
 
@@ -180,6 +191,87 @@ func TestGenerate_Ollama_Happy(t *testing.T) {
 	}
 	if resp.Usage.Source != llm.UsageReported {
 		t.Fatalf("Usage.Source = %q", resp.Usage.Source)
+	}
+}
+
+func TestWithTools_Ollama_UnsupportedModel(t *testing.T) {
+	m, err := New(WithModel("llama2"), WithBaseURL("http://localhost:11434"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = m.WithTools([]llm.Tool{{Name: "calculator", Parameters: []byte(`{"type":"object"}`)}})
+	if err == nil {
+		t.Fatal("WithTools() error = nil, want non-nil")
+	}
+	if !errors.Is(err, llm.ErrCapabilityNotSupported) {
+		t.Fatalf("errors.Is(err, ErrCapabilityNotSupported) = false, err=%v", err)
+	}
+	if !strings.Contains(err.Error(), "ProviderInfo.Capabilities.Tools=false") {
+		t.Fatalf("error = %q, want capability truth hint", err)
+	}
+}
+
+func TestWithTools_Ollama_Llama31NativeToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := readBody(t, r)
+		if !strings.Contains(body, `"tools":[`) {
+			t.Fatalf("request body missing tools: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"llama3.1:8b","created_at":"2026-05-11T00:00:00Z","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_calc","function":{"index":0,"name":"calculator","arguments":{"expr":"2+2"}}}]},"done":true,"done_reason":"stop","prompt_eval_count":12,"eval_count":8}` + "\n"))
+	}))
+	defer server.Close()
+
+	base, err := New(WithModel("llama3.1:8b"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	m, err := base.WithTools([]llm.Tool{{Name: "calculator", Description: "calc tool", Parameters: []byte(`{"type":"object","properties":{"expr":{"type":"string"}},"required":["expr"]}`)}})
+	if err != nil {
+		t.Fatalf("WithTools(): %v", err)
+	}
+
+	resp, err := m.Generate(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "2+2"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].ID != "call_calc" || resp.ToolCalls[0].Name != "calculator" || string(resp.ToolCalls[0].Arguments) != `{"expr":"2+2"}` {
+		t.Fatalf("ToolCalls[0] = %+v, want calculator tool call", resp.ToolCalls[0])
+	}
+}
+
+func TestWithTools_Ollama_QwenXMLFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"qwen3-coder:latest","created_at":"2026-05-11T00:00:00Z","message":{"role":"assistant","content":"Checking now.\n<tool_call>{\"name\":\"calculator\",\"arguments\":{\"expr\":\"2+2\"}}</tool_call>"},"done":true,"done_reason":"stop","prompt_eval_count":9,"eval_count":6}` + "\n"))
+	}))
+	defer server.Close()
+
+	base, err := New(WithModel("qwen3-coder:latest"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	m, err := base.WithTools([]llm.Tool{{Name: "calculator", Description: "calc tool", Parameters: []byte(`{"type":"object"}`)}})
+	if err != nil {
+		t.Fatalf("WithTools(): %v", err)
+	}
+
+	resp, err := m.Generate(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "2+2"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if resp.Text != "Checking now." {
+		t.Fatalf("Text = %q, want Checking now.", resp.Text)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "calculator" || string(resp.ToolCalls[0].Arguments) != `{"expr":"2+2"}` {
+		t.Fatalf("ToolCalls = %+v, want qwen xml parsed tool call", resp.ToolCalls)
 	}
 }
 
