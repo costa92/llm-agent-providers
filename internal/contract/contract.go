@@ -90,11 +90,35 @@ func AssertGenerate(t *testing.T, model llm.ChatModel, f Fixture) {
 		Messages: []llm.Message{{Role: "user", Content: "hello"}},
 	}
 	resp, err := model.Generate(t.Context(), req)
+	assertResponse(t, resp, err, f, "Generate")
+}
 
+func AssertStream(t *testing.T, model llm.ChatModel, f Fixture) {
+	t.Helper()
+	req := llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+	}
+	sr, err := model.Stream(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Stream: unexpected error creating stream: %v", err)
+	}
+	resp, err := llm.AccumulateStream(sr)
+	info := model.Info()
+	if resp.Provider == "" {
+		resp.Provider = info.Provider
+	}
+	if resp.Model == "" {
+		resp.Model = info.Model
+	}
+	assertResponse(t, resp, err, f, "Stream")
+}
+
+func assertResponse(t *testing.T, resp llm.Response, err error, f Fixture, op string) {
+	t.Helper()
 	switch f.Expect.ErrorType {
 	case "":
 		if err != nil {
-			t.Fatalf("Generate: unexpected error: %v", err)
+			t.Fatalf("%s: unexpected error: %v", op, err)
 		}
 		if f.Expect.ResponseText != "" && resp.Text != f.Expect.ResponseText {
 			t.Errorf("Text: got %q want %q", resp.Text, f.Expect.ResponseText)
