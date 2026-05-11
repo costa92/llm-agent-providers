@@ -1,0 +1,47 @@
+{
+  "scenario": "tool_parallel_gpt-4o-mini",
+  "tools": [
+    {
+      "name": "calculator",
+      "description": "Compute arithmetic expressions",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"expr\":{\"type\":\"string\"}},\"required\":[\"expr\"]}"
+    },
+    {
+      "name": "search",
+      "description": "Search the web",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}},\"required\":[\"q\"]}"
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/chat/completions",
+    "body_assertions": [
+      "\"tools\":[",
+      "\"name\":\"calculator\"",
+      "\"name\":\"search\""
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "{\n      \"id\":\"chatcmpl_tool_2\",\n      \"object\":\"chat.completion\",\n      \"created\":1710000000,\n      \"model\":\"gpt-4o-mini\",\n      \"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_calc\",\"type\":\"function\",\"function\":{\"name\":\"calculator\",\"arguments\":\"{\\\"expr\\\":\\\"2+2\\\"}\"}},{\"id\":\"call_search\",\"type\":\"function\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\\\"weather\\\"}\"}}]},\"finish_reason\":\"tool_calls\",\"logprobs\":null}],\n      \"usage\":{\"prompt_tokens\":11,\"completion_tokens\":5,\"total_tokens\":16}\n    }"
+  },
+  "expect": {
+    "finish_reason": "tool_calls",
+    "provider": "openai",
+    "tool_calls": [
+      {
+        "id": "call_calc",
+        "name": "calculator",
+        "arguments": "{\"expr\":\"2+2\"}"
+      },
+      {
+        "id": "call_search",
+        "name": "search",
+        "arguments": "{\"q\":\"weather\"}"
+      }
+    ]
+  }
+}

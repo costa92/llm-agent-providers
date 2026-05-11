@@ -1,0 +1,47 @@
+{
+  "scenario": "tool_multiblock_claude-3-5-haiku",
+  "tools": [
+    {
+      "name": "calculator",
+      "description": "Compute arithmetic expressions",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"expr\":{\"type\":\"string\"}},\"required\":[\"expr\"]}"
+    },
+    {
+      "name": "search",
+      "description": "Search the web",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}},\"required\":[\"q\"]}"
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "body_assertions": [
+      "\"tools\":[",
+      "\"name\":\"calculator\"",
+      "\"name\":\"search\""
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "{\n      \"id\":\"msg_tool_2\",\n      \"type\":\"message\",\n      \"role\":\"assistant\",\n      \"model\":\"claude-3-5-haiku-20241022\",\n      \"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_calc\",\"name\":\"calculator\",\"input\":{\"expr\":\"2+2\"},\"caller\":{\"type\":\"direct\"}},{\"type\":\"tool_use\",\"id\":\"toolu_search\",\"name\":\"search\",\"input\":{\"q\":\"weather\"},\"caller\":{\"type\":\"direct\"}}],\n      \"stop_reason\":\"tool_use\",\n      \"stop_sequence\":null,\n      \"usage\":{\"input_tokens\":11,\"output_tokens\":5}\n    }"
+  },
+  "expect": {
+    "finish_reason": "tool_calls",
+    "provider": "anthropic",
+    "tool_calls": [
+      {
+        "id": "toolu_calc",
+        "name": "calculator",
+        "arguments": "{\"expr\":\"2+2\"}"
+      },
+      {
+        "id": "toolu_search",
+        "name": "search",
+        "arguments": "{\"q\":\"weather\"}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "scenario": "tool_happy_claude-3-5-haiku",
+  "tools": [
+    {
+      "name": "calculator",
+      "description": "Compute arithmetic expressions",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"expr\":{\"type\":\"string\"}},\"required\":[\"expr\"]}"
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "body_assertions": [
+      "\"tools\":[",
+      "\"name\":\"calculator\"",
+      "\"tool_choice\":{\"type\":\"auto\"}"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "{\n      \"id\":\"msg_tool_1\",\n      \"type\":\"message\",\n      \"role\":\"assistant\",\n      \"model\":\"claude-3-5-haiku-20241022\",\n      \"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_calc\",\"name\":\"calculator\",\"input\":{\"expr\":\"2+2\"},\"caller\":{\"type\":\"direct\"}}],\n      \"stop_reason\":\"tool_use\",\n      \"stop_sequence\":null,\n      \"usage\":{\"input_tokens\":10,\"output_tokens\":4}\n    }"
+  },
+  "expect": {
+    "finish_reason": "tool_calls",
+    "provider": "anthropic",
+    "tool_calls": [
+      {
+        "id": "toolu_calc",
+        "name": "calculator",
+        "arguments": "{\"expr\":\"2+2\"}"
+      }
+    ]
+  }
+}

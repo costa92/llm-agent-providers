@@ -16,7 +16,12 @@ import (
 
 type Fixture struct {
 	Scenario string `json:"scenario"`
-	Request  struct {
+	Tools    []struct {
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
+		Parameters  string `json:"parameters"`
+	} `json:"tools,omitempty"`
+	Request struct {
 		Method         string   `json:"method"`
 		Path           string   `json:"path"`
 		BodyAssertions []string `json:"body_assertions"`
@@ -34,6 +39,11 @@ type Fixture struct {
 		UsageOutputTokens int    `json:"usage_output_tokens,omitempty"`
 		UsageSource       string `json:"usage_source,omitempty"`
 		Provider          string `json:"provider,omitempty"`
+		ToolCalls         []struct {
+			ID        string `json:"id,omitempty"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"tool_calls,omitempty"`
 	} `json:"expect"`
 }
 
@@ -113,6 +123,40 @@ func AssertStream(t *testing.T, model llm.ChatModel, f Fixture) {
 	assertResponse(t, resp, err, f, "Stream")
 }
 
+func AssertToolCalling(t *testing.T, model llm.ChatModel, f Fixture) {
+	t.Helper()
+	tc, ok := model.(llm.ToolCaller)
+	if !ok {
+		t.Fatalf("model %T does not implement llm.ToolCaller", model)
+	}
+	tools := make([]llm.Tool, 0, len(f.Tools))
+	for _, tool := range f.Tools {
+		tools = append(tools, llm.Tool{
+			Name:        tool.Name,
+			Description: tool.Description,
+			Parameters:  []byte(tool.Parameters),
+		})
+	}
+	bound, err := tc.WithTools(tools)
+	if f.Expect.ErrorType == "CapabilityNotSupported" {
+		if err == nil {
+			t.Fatal("WithTools(): error = nil, want capability error")
+		}
+		if !errors.Is(err, llm.ErrCapabilityNotSupported) {
+			t.Fatalf("errors.Is(err, ErrCapabilityNotSupported) = false, err=%T %v", err, err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("WithTools(): %v", err)
+	}
+	req := llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "use tools"}},
+	}
+	resp, err := bound.Generate(t.Context(), req)
+	assertResponse(t, resp, err, f, "Generate")
+}
+
 func assertResponse(t *testing.T, resp llm.Response, err error, f Fixture, op string) {
 	t.Helper()
 	switch f.Expect.ErrorType {
@@ -138,6 +182,23 @@ func assertResponse(t *testing.T, resp llm.Response, err error, f Fixture, op st
 		if f.Expect.Provider != "" && resp.Provider != f.Expect.Provider {
 			t.Errorf("Provider: got %q want %q", resp.Provider, f.Expect.Provider)
 		}
+		if len(f.Expect.ToolCalls) != 0 {
+			if len(resp.ToolCalls) != len(f.Expect.ToolCalls) {
+				t.Fatalf("ToolCalls len: got %d want %d", len(resp.ToolCalls), len(f.Expect.ToolCalls))
+			}
+			for i, want := range f.Expect.ToolCalls {
+				got := resp.ToolCalls[i]
+				if want.ID != "" && got.ID != want.ID {
+					t.Errorf("ToolCalls[%d].ID: got %q want %q", i, got.ID, want.ID)
+				}
+				if got.Name != want.Name {
+					t.Errorf("ToolCalls[%d].Name: got %q want %q", i, got.Name, want.Name)
+				}
+				if !jsonEqual(got.Arguments, []byte(want.Arguments)) {
+					t.Errorf("ToolCalls[%d].Arguments: got %s want %s", i, string(got.Arguments), want.Arguments)
+				}
+			}
+		}
 	case "AuthError":
 		var e *llm.AuthError
 		if !errors.As(err, &e) {
@@ -158,7 +219,25 @@ func assertResponse(t *testing.T, resp llm.Response, err error, f Fixture, op st
 		if !errors.As(err, &e) {
 			t.Errorf("expected *llm.TransientError, got %T: %v", err, err)
 		}
+	case "CapabilityNotSupported":
+		if !errors.Is(err, llm.ErrCapabilityNotSupported) {
+			t.Errorf("expected ErrCapabilityNotSupported, got %T: %v", err, err)
+		}
 	default:
 		t.Errorf("unknown Fixture.Expect.ErrorType: %q", f.Expect.ErrorType)
 	}
+}
+
+func jsonEqual(a, b []byte) bool {
+	var av any
+	var bv any
+	if err := json.Unmarshal(a, &av); err != nil {
+		return string(a) == string(b)
+	}
+	if err := json.Unmarshal(b, &bv); err != nil {
+		return string(a) == string(b)
+	}
+	ab, _ := json.Marshal(av)
+	bb, _ := json.Marshal(bv)
+	return string(ab) == string(bb)
 }

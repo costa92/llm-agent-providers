@@ -1,0 +1,36 @@
+{
+  "scenario": "tool_happy_llama3.1-8b",
+  "tools": [
+    {
+      "name": "calculator",
+      "description": "Compute arithmetic expressions",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"expr\":{\"type\":\"string\"}},\"required\":[\"expr\"]}"
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/chat",
+    "body_assertions": [
+      "\"tools\":[",
+      "\"name\":\"calculator\""
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/x-ndjson"
+    },
+    "body": "{\"model\":\"llama3.1:8b\",\"created_at\":\"2026-05-11T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_calc\",\"function\":{\"index\":0,\"name\":\"calculator\",\"arguments\":{\"expr\":\"2+2\"}}}]},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":10,\"eval_count\":4}\n"
+  },
+  "expect": {
+    "finish_reason": "stop",
+    "provider": "ollama",
+    "tool_calls": [
+      {
+        "id": "call_calc",
+        "name": "calculator",
+        "arguments": "{\"expr\":\"2+2\"}"
+      }
+    ]
+  }
+}

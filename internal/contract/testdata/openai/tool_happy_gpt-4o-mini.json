@@ -1,0 +1,39 @@
+{
+  "scenario": "tool_happy_gpt-4o-mini",
+  "tools": [
+    {
+      "name": "calculator",
+      "description": "Compute arithmetic expressions",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"expr\":{\"type\":\"string\"}},\"required\":[\"expr\"]}"
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/chat/completions",
+    "body_assertions": [
+      "\"tools\":[",
+      "\"name\":\"calculator\""
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "{\n      \"id\":\"chatcmpl_tool_1\",\n      \"object\":\"chat.completion\",\n      \"created\":1710000000,\n      \"model\":\"gpt-4o-mini\",\n      \"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_calc\",\"type\":\"function\",\"function\":{\"name\":\"calculator\",\"arguments\":\"{\\\"expr\\\":\\\"2+2\\\"}\"}}]},\"finish_reason\":\"tool_calls\",\"logprobs\":null}],\n      \"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4,\"total_tokens\":14}\n    }"
+  },
+  "expect": {
+    "finish_reason": "tool_calls",
+    "usage_input_tokens": 10,
+    "usage_output_tokens": 4,
+    "usage_source": "reported",
+    "provider": "openai",
+    "tool_calls": [
+      {
+        "id": "call_calc",
+        "name": "calculator",
+        "arguments": "{\"expr\":\"2+2\"}"
+      }
+    ]
+  }
+}

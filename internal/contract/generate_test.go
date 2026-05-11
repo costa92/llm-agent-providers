@@ -104,6 +104,101 @@ func TestStream_Conformance(t *testing.T) {
 	}
 }
 
+func TestToolCalling_Conformance(t *testing.T) {
+	cases := []struct {
+		provider string
+		scenario string
+	}{
+		{"openai", "tool_happy_gpt-4o-mini"},
+		{"openai", "tool_parallel_gpt-4o-mini"},
+		{"anthropic", "tool_happy_claude-3-5-haiku"},
+		{"anthropic", "tool_multiblock_claude-3-5-haiku"},
+		{"ollama", "tool_happy_llama3.1-8b"},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.provider+"/"+c.scenario, func(t *testing.T) {
+			t.Parallel()
+			f := LoadFixture(t, c.provider, c.scenario)
+			srv := NewMockServer(t, f)
+			t.Cleanup(srv.Close)
+			factory := AdapterFactories[c.provider]
+			model, err := factory(srv.URL)
+			if err != nil {
+				t.Fatalf("factory: %v", err)
+			}
+			AssertToolCalling(t, model, f)
+		})
+	}
+}
+
+func TestToolCalling_CapabilityDegrade_Ollama(t *testing.T) {
+	model, err := ollama.New(
+		ollama.WithModel("llama2"),
+		ollama.WithBaseURL("http://localhost:11434"),
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	f := Fixture{}
+	f.Expect.ErrorType = "CapabilityNotSupported"
+	f.Tools = []struct {
+		Name        string "json:\"name\""
+		Description string "json:\"description,omitempty\""
+		Parameters  string "json:\"parameters\""
+	}{
+		{Name: "calculator", Parameters: `{"type":"object","properties":{"expr":{"type":"string"}}}`},
+	}
+	AssertToolCalling(t, model, f)
+}
+
+func TestToolCalling_DedupeKey(t *testing.T) {
+	seen := map[string]struct{}{}
+	accept := func(messageID string, calls []llm.ToolCall) []llm.ToolCall {
+		out := make([]llm.ToolCall, 0, len(calls))
+		for _, call := range calls {
+			key := messageID + ":" + call.ID
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, call)
+		}
+		return out
+	}
+
+	calls := []llm.ToolCall{
+		{ID: "call_calc", Name: "calculator", Arguments: []byte(`{"expr":"2+2"}`)},
+		{ID: "call_calc", Name: "calculator", Arguments: []byte(`{"expr":"2+2"}`)},
+		{ID: "call_search", Name: "search", Arguments: []byte(`{"q":"weather"}`)},
+	}
+
+	accepted := accept("msg_123", calls)
+	if len(accepted) != 2 {
+		t.Fatalf("accepted len = %d, want 2", len(accepted))
+	}
+	again := accept("msg_123", []llm.ToolCall{{ID: "call_search", Name: "search", Arguments: []byte(`{"q":"weather"}`)}})
+	if len(again) != 0 {
+		t.Fatalf("accepted duplicate len = %d, want 0", len(again))
+	}
+}
+
+func TestToolCalling_UnsupportedErrorSentinel(t *testing.T) {
+	model, err := ollama.New(
+		ollama.WithModel("llama2"),
+		ollama.WithBaseURL("http://localhost:11434"),
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	var tc llm.ToolCaller = model
+	_, err = tc.WithTools([]llm.Tool{{Name: "calculator", Parameters: []byte(`{"type":"object"}`)}})
+	if !errors.Is(err, llm.ErrCapabilityNotSupported) {
+		t.Fatalf("errors.Is(err, ErrCapabilityNotSupported) = false, err=%v", err)
+	}
+}
+
 func TestStream_CancelMidStream_Conformance(t *testing.T) {
 	cases := []struct {
 		provider string
