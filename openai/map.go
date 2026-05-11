@@ -1,8 +1,12 @@
 package openai
 
 import (
+	"encoding/json"
+
 	"github.com/costa92/llm-agent/llm"
 	openai "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/shared"
 )
 
 func (o *OpenAI) toSDKRequest(req llm.Request) openai.ChatCompletionNewParams {
@@ -31,6 +35,23 @@ func (o *OpenAI) toSDKRequest(req llm.Request) openai.ChatCompletionNewParams {
 	if req.Temperature != nil {
 		p.Temperature = openai.Float(float64(*req.Temperature))
 	}
+	if len(o.tools) > 0 {
+		p.Tools = make([]openai.ChatCompletionToolUnionParam, 0, len(o.tools))
+		p.ParallelToolCalls = openai.Bool(true)
+		for _, tool := range o.tools {
+			def := shared.FunctionDefinitionParam{Name: tool.Name}
+			if tool.Description != "" {
+				def.Description = param.NewOpt(tool.Description)
+			}
+			if len(tool.Parameters) > 0 {
+				var schema shared.FunctionParameters
+				if err := json.Unmarshal(tool.Parameters, &schema); err == nil {
+					def.Parameters = schema
+				}
+			}
+			p.Tools = append(p.Tools, openai.ChatCompletionFunctionTool(def))
+		}
+	}
 	return p
 }
 
@@ -58,6 +79,7 @@ func (o *OpenAI) fromSDKResponse(c *openai.ChatCompletion) llm.Response {
 		FinishReason: finish,
 		Provider:     "openai",
 		Model:        c.Model,
+		ToolCalls:    sdkToolCalls(c),
 		Usage: llm.Usage{
 			InputTokens:  int(c.Usage.PromptTokens),
 			OutputTokens: int(c.Usage.CompletionTokens),
@@ -82,4 +104,27 @@ func mapFinishReason(s string) llm.FinishReason {
 	default:
 		return llm.FinishReasonUnknown
 	}
+}
+
+func sdkToolCalls(c *openai.ChatCompletion) []llm.ToolCall {
+	if len(c.Choices) == 0 {
+		return nil
+	}
+	calls := c.Choices[0].Message.ToolCalls
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]llm.ToolCall, 0, len(calls))
+	for _, call := range calls {
+		if call.Type != "function" {
+			continue
+		}
+		fn := call.AsFunction()
+		out = append(out, llm.ToolCall{
+			ID:        fn.ID,
+			Name:      fn.Function.Name,
+			Arguments: []byte(fn.Function.Arguments),
+		})
+	}
+	return out
 }

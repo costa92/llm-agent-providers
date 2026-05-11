@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -36,8 +37,99 @@ func TestInfo_OpenAI(t *testing.T) {
 	if info.Model != "gpt-4o-mini" {
 		t.Fatalf("Model = %q, want gpt-4o-mini", info.Model)
 	}
-	if info.Capabilities.Tools || info.Capabilities.Embeddings || info.Capabilities.StructuredOutputs || info.Capabilities.PromptCaching {
-		t.Fatalf("Capabilities = %+v, want all false", info.Capabilities)
+	if !info.Capabilities.Tools || info.Capabilities.Embeddings || info.Capabilities.StructuredOutputs || info.Capabilities.PromptCaching {
+		t.Fatalf("Capabilities = %+v, want tools=true and others=false", info.Capabilities)
+	}
+}
+
+func TestWithTools_OpenAI_ImmutableAndIndependent(t *testing.T) {
+	var calcSeen atomic.Int32
+	var searchSeen atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodyStr := string(body)
+
+		switch {
+		case strings.Contains(bodyStr, `"name":"calc"`):
+			calcSeen.Add(1)
+			if strings.Contains(bodyStr, `"name":"search"`) {
+				t.Fatalf("calc-bound request leaked search tool: %s", bodyStr)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"id":"chatcmpl_calc",
+				"object":"chat.completion",
+				"created":1710000000,
+				"model":"gpt-4o-mini",
+				"choices":[{"index":0,"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_calc","type":"function","function":{"name":"calc","arguments":"{\"expr\":\"2+2\"}"}}]},"finish_reason":"tool_calls","logprobs":null}],
+				"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}
+			}`))
+		case strings.Contains(bodyStr, `"name":"search"`):
+			searchSeen.Add(1)
+			if strings.Contains(bodyStr, `"name":"calc"`) {
+				t.Fatalf("search-bound request leaked calc tool: %s", bodyStr)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"id":"chatcmpl_search",
+				"object":"chat.completion",
+				"created":1710000000,
+				"model":"gpt-4o-mini",
+				"choices":[{"index":0,"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_search","type":"function","function":{"name":"search","arguments":"{\"q\":\"sky\"}"}}]},"finish_reason":"tool_calls","logprobs":null}],
+				"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}
+			}`))
+		default:
+			t.Fatalf("request missing bound tool: %s", bodyStr)
+		}
+	}))
+	defer server.Close()
+
+	base, err := New(WithModel("gpt-4o-mini"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	calcBound, err := base.WithTools([]llm.Tool{{Name: "calc", Description: "calculator", Parameters: []byte(`{"type":"object"}`)}})
+	if err != nil {
+		t.Fatalf("WithTools(calc): %v", err)
+	}
+	searchBound, err := base.WithTools([]llm.Tool{{Name: "search", Description: "search", Parameters: []byte(`{"type":"object"}`)}})
+	if err != nil {
+		t.Fatalf("WithTools(search): %v", err)
+	}
+	if calcBound == searchBound {
+		t.Fatal("WithTools must return distinct values")
+	}
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		resp, err := calcBound.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "2+2"}}})
+		if err == nil && (len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "calc") {
+			err = fmt.Errorf("calc response tool calls = %+v, want calc", resp.ToolCalls)
+		}
+		errCh <- err
+	}()
+	go func() {
+		defer wg.Done()
+		resp, err := searchBound.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "sky"}}})
+		if err == nil && (len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "search") {
+			err = fmt.Errorf("search response tool calls = %+v, want search", resp.ToolCalls)
+		}
+		errCh <- err
+	}()
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calcSeen.Load() != 1 || searchSeen.Load() != 1 {
+		t.Fatalf("calcSeen=%d searchSeen=%d, want 1 each", calcSeen.Load(), searchSeen.Load())
 	}
 }
 
@@ -173,6 +265,70 @@ func TestStream_OpenAI_DoesNotRetryAfterFirstByte(t *testing.T) {
 	}
 }
 
+func TestStream_OpenAI_ToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_tools\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_calc\",\"type\":\"function\",\"function\":{\"name\":\"calc\",\"arguments\":\"{\\\"expr\\\":\"}},{\"index\":1,\"id\":\"call_search\",\"type\":\"function\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\"}}]},\"finish_reason\":\"\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_tools\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"2+2\\\"}\"}},{\"index\":1,\"function\":{\"arguments\":\"\\\"weather\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_tools\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"gpt-4o-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":5,\"total_tokens\":14}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("gpt-4o-mini"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "use tools"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	defer sr.Close()
+
+	wantKinds := []llm.StreamEventKind{
+		llm.EventToolCallStart,
+		llm.EventToolCallArgsDelta,
+		llm.EventToolCallStart,
+		llm.EventToolCallArgsDelta,
+		llm.EventToolCallArgsDelta,
+		llm.EventToolCallArgsDelta,
+		llm.EventToolCallEnd,
+		llm.EventToolCallEnd,
+		llm.EventDone,
+	}
+	var got []llm.StreamEvent
+	for range wantKinds {
+		ev, err := sr.Next()
+		if err != nil {
+			t.Fatalf("Next(): %v", err)
+		}
+		got = append(got, ev)
+	}
+	for i, want := range wantKinds {
+		if got[i].Kind != want {
+			t.Fatalf("event[%d].Kind = %v, want %v", i, got[i].Kind, want)
+		}
+	}
+	if got[0].ToolCall == nil || got[0].ToolCall.Index != 0 || got[0].ToolCall.ID != "call_calc" || got[0].ToolCall.Name != "calc" {
+		t.Fatalf("event[0] = %+v, want calc start", got[0])
+	}
+	if got[2].ToolCall == nil || got[2].ToolCall.Index != 1 || got[2].ToolCall.ID != "call_search" || got[2].ToolCall.Name != "search" {
+		t.Fatalf("event[2] = %+v, want search start", got[2])
+	}
+	if got[6].ToolCall == nil || got[6].ToolCall.Index != 0 {
+		t.Fatalf("event[6] = %+v, want tool end index 0", got[6])
+	}
+	if got[7].ToolCall == nil || got[7].ToolCall.Index != 1 {
+		t.Fatalf("event[7] = %+v, want tool end index 1", got[7])
+	}
+	if got[8].Usage == nil || got[8].FinishReason != llm.FinishReasonToolCalls {
+		t.Fatalf("event[8] = %+v, want done with tool_calls finish", got[8])
+	}
+}
+
 func TestGenerate_OpenAI_Happy(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -225,6 +381,59 @@ func TestGenerate_OpenAI_Happy(t *testing.T) {
 	}
 	if resp.Usage.Source != llm.UsageReported {
 		t.Fatalf("Usage.Source = %q, want %q", resp.Usage.Source, llm.UsageReported)
+	}
+}
+
+func TestGenerate_OpenAI_ToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl_456",
+			"object":"chat.completion",
+			"created":1710000000,
+			"model":"gpt-4o-mini",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"","tool_calls":[
+				{"id":"call_calc","type":"function","function":{"name":"calc","arguments":"{\"expr\":\"2+2\"}"}},
+				{"id":"call_search","type":"function","function":{"name":"search","arguments":"{\"q\":\"weather\"}"}}
+			]},"finish_reason":"tool_calls","logprobs":null}],
+			"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}
+		}`))
+	}))
+	defer server.Close()
+
+	base, err := New(
+		WithModel("gpt-4o-mini"),
+		WithAPIKey("test-key"),
+		WithBaseURL(server.URL),
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	m, err := base.WithTools([]llm.Tool{
+		{Name: "calc", Description: "calculator", Parameters: []byte(`{"type":"object"}`)},
+		{Name: "search", Description: "search", Parameters: []byte(`{"type":"object"}`)},
+	})
+	if err != nil {
+		t.Fatalf("WithTools(): %v", err)
+	}
+
+	resp, err := m.Generate(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "use tools"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if resp.FinishReason != llm.FinishReasonToolCalls {
+		t.Fatalf("FinishReason = %q, want %q", resp.FinishReason, llm.FinishReasonToolCalls)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("len(ToolCalls) = %d, want 2", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].ID != "call_calc" || resp.ToolCalls[0].Name != "calc" || string(resp.ToolCalls[0].Arguments) != `{"expr":"2+2"}` {
+		t.Fatalf("ToolCalls[0] = %+v, want calc tool call", resp.ToolCalls[0])
+	}
+	if resp.ToolCalls[1].ID != "call_search" || resp.ToolCalls[1].Name != "search" || string(resp.ToolCalls[1].Arguments) != `{"q":"weather"}` {
+		t.Fatalf("ToolCalls[1] = %+v, want search tool call", resp.ToolCalls[1])
 	}
 }
 

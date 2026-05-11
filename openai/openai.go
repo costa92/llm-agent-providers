@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"io"
+	"sort"
 	"sync"
 
 	"github.com/costa92/llm-agent/llm"
@@ -10,11 +11,15 @@ import (
 	"github.com/openai/openai-go/v3/packages/ssestream"
 )
 
-var _ llm.ChatModel = (*OpenAI)(nil)
+var (
+	_ llm.ChatModel  = (*OpenAI)(nil)
+	_ llm.ToolCaller = (*OpenAI)(nil)
+)
 
 type OpenAI struct {
 	client *openai.Client
 	info   llm.ProviderInfo
+	tools  []llm.Tool
 }
 
 func (o *OpenAI) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
@@ -37,6 +42,12 @@ func (o *OpenAI) Stream(ctx context.Context, req llm.Request) (llm.StreamReader,
 
 func (o *OpenAI) Info() llm.ProviderInfo { return o.info }
 
+func (o *OpenAI) WithTools(tools []llm.Tool) (llm.ToolCaller, error) {
+	cp := *o
+	cp.tools = append([]llm.Tool(nil), tools...)
+	return &cp, nil
+}
+
 type openaiStreamReader struct {
 	mu            sync.Mutex
 	open          func() *ssestream.Stream[openai.ChatCompletionChunk]
@@ -46,6 +57,7 @@ type openaiStreamReader struct {
 	deliveredByte bool
 	lastFinish    llm.FinishReason
 	closed        bool
+	toolIndexes   map[int]struct{}
 }
 
 func (r *openaiStreamReader) Next() (llm.StreamEvent, error) {
@@ -124,6 +136,10 @@ func (r *openaiStreamReader) chunkEvents(chunk openai.ChatCompletionChunk) []llm
 			})
 		}
 		for _, tool := range choice.Delta.ToolCalls {
+			if r.toolIndexes == nil {
+				r.toolIndexes = make(map[int]struct{})
+			}
+			r.toolIndexes[int(tool.Index)] = struct{}{}
 			if tool.ID != "" || tool.Function.Name != "" {
 				events = append(events, llm.StreamEvent{
 					Kind: llm.EventToolCallStart,
@@ -147,6 +163,22 @@ func (r *openaiStreamReader) chunkEvents(chunk openai.ChatCompletionChunk) []llm
 		}
 		if choice.FinishReason != "" {
 			r.lastFinish = mapFinishReason(choice.FinishReason)
+			if r.lastFinish == llm.FinishReasonToolCalls && len(r.toolIndexes) > 0 {
+				indexes := make([]int, 0, len(r.toolIndexes))
+				for idx := range r.toolIndexes {
+					indexes = append(indexes, idx)
+				}
+				sort.Ints(indexes)
+				for _, idx := range indexes {
+					events = append(events, llm.StreamEvent{
+						Kind: llm.EventToolCallEnd,
+						ToolCall: &llm.ToolCallDelta{
+							Index: idx,
+						},
+					})
+				}
+				r.toolIndexes = nil
+			}
 		}
 	}
 

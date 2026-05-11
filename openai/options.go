@@ -71,7 +71,7 @@ func New(opts ...Option) (*OpenAI, error) {
 			Provider: "openai",
 			Model:    cfg.model,
 			Capabilities: llm.Capabilities{
-				Tools:             false,
+				Tools:             true,
 				Embeddings:        false,
 				StructuredOutputs: false,
 				PromptCaching:     false,
