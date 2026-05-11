@@ -37,8 +37,102 @@ func TestInfo_Anthropic(t *testing.T) {
 	if info.Model != "claude-3-5-haiku-20241022" {
 		t.Fatalf("Model = %q", info.Model)
 	}
-	if info.Capabilities.Tools || info.Capabilities.Embeddings || info.Capabilities.StructuredOutputs || info.Capabilities.PromptCaching {
-		t.Fatalf("Capabilities = %+v, want all false", info.Capabilities)
+	if !info.Capabilities.Tools || info.Capabilities.Embeddings || info.Capabilities.StructuredOutputs || info.Capabilities.PromptCaching {
+		t.Fatalf("Capabilities = %+v, want tools=true and others=false", info.Capabilities)
+	}
+}
+
+func TestWithTools_Anthropic_ImmutableAndRequestShape(t *testing.T) {
+	var weatherSeen atomic.Int32
+	var calcSeen atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if _, ok := payload["tool_choice"]; !ok {
+			t.Fatalf("payload missing tool_choice: %s", string(body))
+		}
+		tools, ok := payload["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("tools = %#v, want single bound tool", payload["tools"])
+		}
+		tool, ok := tools[0].(map[string]any)
+		if !ok {
+			t.Fatalf("tool wrong type: %T", tools[0])
+		}
+		name, _ := tool["name"].(string)
+		switch name {
+		case "weather":
+			weatherSeen.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"id":"msg_weather",
+				"type":"message",
+				"role":"assistant",
+				"model":"claude-3-5-haiku-20241022",
+				"content":[{"type":"tool_use","id":"toolu_weather","name":"weather","input":{"city":"Paris"},"caller":{"type":"direct"}}],
+				"stop_reason":"tool_use",
+				"stop_sequence":null,
+				"usage":{"input_tokens":11,"output_tokens":7}
+			}`))
+		case "calc":
+			calcSeen.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"id":"msg_calc",
+				"type":"message",
+				"role":"assistant",
+				"model":"claude-3-5-haiku-20241022",
+				"content":[{"type":"tool_use","id":"toolu_calc","name":"calc","input":{"expr":"2+2"},"caller":{"type":"direct"}}],
+				"stop_reason":"tool_use",
+				"stop_sequence":null,
+				"usage":{"input_tokens":11,"output_tokens":7}
+			}`))
+		default:
+			t.Fatalf("unexpected tool binding: %q in %s", name, string(body))
+		}
+	}))
+	defer server.Close()
+
+	base, err := New(WithModel("claude-3-5-haiku-20241022"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	weatherBound, err := base.WithTools([]llm.Tool{{Name: "weather", Description: "weather tool", Parameters: []byte(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`)}})
+	if err != nil {
+		t.Fatalf("WithTools(weather): %v", err)
+	}
+	calcBound, err := base.WithTools([]llm.Tool{{Name: "calc", Description: "calc tool", Parameters: []byte(`{"type":"object","properties":{"expr":{"type":"string"}},"required":["expr"]}`)}})
+	if err != nil {
+		t.Fatalf("WithTools(calc): %v", err)
+	}
+	if weatherBound == calcBound {
+		t.Fatal("WithTools must return distinct values")
+	}
+
+	respA, err := weatherBound.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "weather"}}})
+	if err != nil {
+		t.Fatalf("weather Generate(): %v", err)
+	}
+	respB, err := calcBound.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "calc"}}})
+	if err != nil {
+		t.Fatalf("calc Generate(): %v", err)
+	}
+	if len(respA.ToolCalls) != 1 || respA.ToolCalls[0].Name != "weather" {
+		t.Fatalf("weather ToolCalls = %+v, want weather", respA.ToolCalls)
+	}
+	if len(respB.ToolCalls) != 1 || respB.ToolCalls[0].Name != "calc" {
+		t.Fatalf("calc ToolCalls = %+v, want calc", respB.ToolCalls)
+	}
+	if weatherSeen.Load() != 1 || calcSeen.Load() != 1 {
+		t.Fatalf("weatherSeen=%d calcSeen=%d, want 1 each", weatherSeen.Load(), calcSeen.Load())
 	}
 }
 
@@ -257,6 +351,65 @@ func TestGenerate_Anthropic_Happy(t *testing.T) {
 	}
 	if resp.Model != "claude-3-5-haiku-20241022" {
 		t.Fatalf("Model = %q", resp.Model)
+	}
+}
+
+func TestGenerate_Anthropic_MultiBlockToolUse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_tools",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-3-5-haiku-20241022",
+			"content":[
+				{"type":"text","text":"checking tools"},
+				{"type":"tool_use","id":"toolu_1","name":"weather","input":{"city":"Paris"},"caller":{"type":"direct"}},
+				{"type":"tool_use","id":"toolu_2","name":"calculator","input":{"expr":"2+2"},"caller":{"type":"direct"}}
+			],
+			"stop_reason":"tool_use",
+			"stop_sequence":null,
+			"usage":{"input_tokens":11,"output_tokens":7}
+		}`))
+	}))
+	defer server.Close()
+
+	base, err := New(
+		WithModel("claude-3-5-haiku-20241022"),
+		WithAPIKey("test-key"),
+		WithBaseURL(server.URL),
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	m, err := base.WithTools([]llm.Tool{
+		{Name: "weather", Description: "weather tool", Parameters: []byte(`{"type":"object"}`)},
+		{Name: "calculator", Description: "calculator tool", Parameters: []byte(`{"type":"object"}`)},
+	})
+	if err != nil {
+		t.Fatalf("WithTools(): %v", err)
+	}
+
+	resp, err := m.Generate(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "use tools"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if resp.Text != "checking tools" {
+		t.Fatalf("Text = %q, want checking tools", resp.Text)
+	}
+	if resp.FinishReason != llm.FinishReasonToolCalls {
+		t.Fatalf("FinishReason = %q, want %q", resp.FinishReason, llm.FinishReasonToolCalls)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("len(ToolCalls) = %d, want 2", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].ID != "toolu_1" || resp.ToolCalls[0].Name != "weather" || string(resp.ToolCalls[0].Arguments) != `{"city":"Paris"}` {
+		t.Fatalf("ToolCalls[0] = %+v, want weather tool call", resp.ToolCalls[0])
+	}
+	if resp.ToolCalls[1].ID != "toolu_2" || resp.ToolCalls[1].Name != "calculator" || string(resp.ToolCalls[1].Arguments) != `{"expr":"2+2"}` {
+		t.Fatalf("ToolCalls[1] = %+v, want calculator tool call", resp.ToolCalls[1])
 	}
 }
 

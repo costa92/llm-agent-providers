@@ -71,7 +71,7 @@ func New(opts ...Option) (*Anthropic, error) {
 			Provider: "anthropic",
 			Model:    cfg.model,
 			Capabilities: llm.Capabilities{
-				Tools:             false,
+				Tools:             true,
 				Embeddings:        false,
 				StructuredOutputs: false,
 				PromptCaching:     false,

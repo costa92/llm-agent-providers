@@ -10,11 +10,15 @@ import (
 	"github.com/costa92/llm-agent/llm"
 )
 
-var _ llm.ChatModel = (*Anthropic)(nil)
+var (
+	_ llm.ChatModel  = (*Anthropic)(nil)
+	_ llm.ToolCaller = (*Anthropic)(nil)
+)
 
 type Anthropic struct {
 	client *sdk.Client
 	info   llm.ProviderInfo
+	tools  []llm.Tool
 }
 
 func (a *Anthropic) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
@@ -38,6 +42,12 @@ func (a *Anthropic) Stream(ctx context.Context, req llm.Request) (llm.StreamRead
 }
 
 func (a *Anthropic) Info() llm.ProviderInfo { return a.info }
+
+func (a *Anthropic) WithTools(tools []llm.Tool) (llm.ToolCaller, error) {
+	cp := *a
+	cp.tools = append([]llm.Tool(nil), tools...)
+	return &cp, nil
+}
 
 type toolBlockMeta struct {
 	id   string
