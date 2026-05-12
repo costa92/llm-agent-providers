@@ -2,6 +2,7 @@ package ollama
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -39,6 +40,17 @@ func TestInfo_Ollama(t *testing.T) {
 	}
 	if !info.Capabilities.Tools || info.Capabilities.Embeddings || info.Capabilities.StructuredOutputs || info.Capabilities.PromptCaching {
 		t.Fatalf("Capabilities = %+v, want tools=true and others=false", info.Capabilities)
+	}
+}
+
+func TestInfo_Ollama_Qwen25CoderSupportsTools(t *testing.T) {
+	m, err := New(WithModel("qwen2.5-coder:latest"), WithBaseURL("http://localhost:11434"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	info := m.Info()
+	if !info.Capabilities.Tools {
+		t.Fatalf("Capabilities = %+v, want tools=true", info.Capabilities)
 	}
 }
 
@@ -343,6 +355,46 @@ func TestWithTools_Ollama_QwenXMLFallback(t *testing.T) {
 	}
 	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "calculator" || string(resp.ToolCalls[0].Arguments) != `{"expr":"2+2"}` {
 		t.Fatalf("ToolCalls = %+v, want qwen xml parsed tool call", resp.ToolCalls)
+	}
+}
+
+func TestWithTools_Ollama_Qwen25BareJSONFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(readBody(t, r), `"tools":[`) {
+			t.Fatal("request body missing tools")
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"qwen2.5-coder:latest","created_at":"2026-05-12T00:00:00Z","message":{"role":"assistant","content":"{\"name\": \"calculator\", \"arguments\": {\"expr\": \"2+2\"}}"},"done":true,"done_reason":"stop","prompt_eval_count":11,"eval_count":5}` + "\n"))
+	}))
+	defer server.Close()
+
+	base, err := New(WithModel("qwen2.5-coder:latest"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	m, err := base.WithTools([]llm.Tool{{Name: "calculator", Description: "calc tool", Parameters: []byte(`{"type":"object"}`)}})
+	if err != nil {
+		t.Fatalf("WithTools(): %v", err)
+	}
+
+	resp, err := m.Generate(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "2+2"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if resp.Text != "" {
+		t.Fatalf("Text = %q, want empty after bare-json tool extraction", resp.Text)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "calculator" {
+		t.Fatalf("ToolCalls = %+v, want qwen bare json parsed tool call", resp.ToolCalls)
+	}
+	var args map[string]string
+	if err := json.Unmarshal(resp.ToolCalls[0].Arguments, &args); err != nil {
+		t.Fatalf("unmarshal arguments: %v", err)
+	}
+	if args["expr"] != "2+2" {
+		t.Fatalf("arguments = %+v, want expr=2+2", args)
 	}
 }
 

@@ -26,10 +26,16 @@ func strategyForModel(model string) ollamaToolStrategy {
 			parserKind:   "python_tag",
 			supportsTool: true,
 		}
+	case strings.HasPrefix(name, "qwen2.5-coder"):
+		return ollamaToolStrategy{
+			family:       "qwen2.5-coder",
+			parserKind:   "qwen_json_or_xml",
+			supportsTool: true,
+		}
 	case strings.HasPrefix(name, "qwen3-coder"):
 		return ollamaToolStrategy{
 			family:       "qwen3-coder",
-			parserKind:   "qwen_xml",
+			parserKind:   "qwen_json_or_xml",
 			supportsTool: true,
 		}
 	default:
@@ -49,8 +55,8 @@ func parseResponseToolCalls(resp api.ChatResponse, strategy ollamaToolStrategy) 
 	switch strategy.parserKind {
 	case "python_tag":
 		return parsePythonTagToolCalls(resp.Message.Content)
-	case "qwen_xml":
-		return parseQwenXMLToolCalls(resp.Message.Content)
+	case "qwen_json_or_xml":
+		return parseQwenToolCalls(resp.Message.Content)
 	default:
 		return nil, resp.Message.Content, nil
 	}
@@ -103,27 +109,35 @@ func parsePythonTagToolCalls(content string) ([]llm.ToolCall, string, error) {
 
 var qwenToolCallRe = regexp.MustCompile(`(?s)<tool_call>\s*(\{.*?\})\s*</tool_call>`)
 
-func parseQwenXMLToolCalls(content string) ([]llm.ToolCall, string, error) {
+func parseQwenToolCalls(content string) ([]llm.ToolCall, string, error) {
 	matches := qwenToolCallRe.FindAllStringSubmatchIndex(content, -1)
-	if len(matches) == 0 {
-		return nil, content, nil
+	if len(matches) > 0 {
+		calls := make([]llm.ToolCall, 0, len(matches))
+		var stripped strings.Builder
+		last := 0
+		for _, match := range matches {
+			stripped.WriteString(content[last:match[0]])
+			raw := content[match[2]:match[3]]
+			call, err := decodeFallbackToolCall(strings.TrimSpace(raw))
+			if err != nil {
+				return nil, "", fmt.Errorf("ollama: qwen_xml tool parse: %w", err)
+			}
+			calls = append(calls, call)
+			last = match[1]
+		}
+		stripped.WriteString(content[last:])
+		return calls, strings.TrimSpace(stripped.String()), nil
 	}
 
-	calls := make([]llm.ToolCall, 0, len(matches))
-	var stripped strings.Builder
-	last := 0
-	for _, match := range matches {
-		stripped.WriteString(content[last:match[0]])
-		raw := content[match[2]:match[3]]
-		call, err := decodeFallbackToolCall(strings.TrimSpace(raw))
-		if err != nil {
-			return nil, "", fmt.Errorf("ollama: qwen_xml tool parse: %w", err)
-		}
-		calls = append(calls, call)
-		last = match[1]
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
+		return nil, content, nil
 	}
-	stripped.WriteString(content[last:])
-	return calls, strings.TrimSpace(stripped.String()), nil
+	call, err := decodeFallbackToolCall(trimmed)
+	if err != nil {
+		return nil, content, nil
+	}
+	return []llm.ToolCall{call}, "", nil
 }
 
 func decodeFallbackToolCall(raw string) (llm.ToolCall, error) {
