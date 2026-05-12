@@ -1,16 +1,60 @@
 # llm-agent-providers
 
-Provider adapters for [`github.com/costa92/llm-agent`](https://github.com/costa92/llm-agent) — OpenAI, Anthropic, and Ollama. Each adapter implements the capability interfaces from `llm-agent/llm` (`ChatModel`, `ToolCaller`, `Embedder`, `StructuredOutputs`).
+Provider adapters for
+[`github.com/costa92/llm-agent`](https://github.com/costa92/llm-agent) —
+OpenAI, Anthropic, and Ollama. Each adapter implements the capability
+interfaces from `llm-agent/llm` (`ChatModel`, `ToolCaller`, `Embedder`,
+`StructuredOutputs`).
 
-> **v0.1.0-pre / Phase 0 skeleton.** Provider implementations land in Phases 1-4 per the [llm-agent ROADMAP](https://github.com/costa92/llm-agent/blob/main/.planning/ROADMAP.md). This repo currently contains only build infrastructure - no Go source files yet.
->
-> **Expected CI status:** The first push CI run may fail on `go mod tidy` because `github.com/costa92/llm-agent v0.3.0-pre.1` does not exist until the core repo tags it at the end of Phase 0. This is intentional Phase-0 signal. Once the core repo cuts the `v0.3.0-pre.1` tag, sister-repo CI goes green automatically.
+This repo now ships the full Phase 1-4 provider surface for the `llm-agent`
+`v0.3.x` cycle:
+
+- OpenAI: Generate, Stream, Tool calling, Embeddings
+- Anthropic: Generate, Stream, Tool calling, explicit `ErrNotSupported` for
+  embeddings
+- Ollama: Generate, Stream, model-aware Tool calling, Embeddings
+- shared `internal/contract` conformance coverage across all three providers
+- nightly Ollama live CI coverage
 
 ## Install
 
 ```bash
-go get github.com/costa92/llm-agent-providers/openai@v0.1.0   # available after Phase 1
+go get github.com/costa92/llm-agent-providers/openai@v0.1.0
+go get github.com/costa92/llm-agent-providers/anthropic@v0.1.0
+go get github.com/costa92/llm-agent-providers/ollama@v0.1.0
 ```
+
+## Shipped provider surface
+
+### OpenAI
+
+- `openai.New(...)` bound-model adapter
+- sync generate
+- streaming with usage capture
+- native function/tool calling
+- embeddings
+
+### Anthropic
+
+- `anthropic.New(...)` bound-model adapter
+- sync generate
+- streaming
+- native tool use
+- documented embedding gap via `llm.ErrNotSupported`
+
+### Ollama
+
+- `ollama.New(...)` bound-model adapter
+- sync generate
+- streaming
+- per-model tool strategy support
+- embeddings
+
+### Conformance
+
+- shared fixture-driven contract coverage in `internal/contract`
+- cross-provider generate/stream/tool/embed assertions
+- nightly live Ollama verification path
 
 ## Cross-repo iteration pattern (INFRA-06)
 
