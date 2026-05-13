@@ -100,6 +100,9 @@ The intended outcome is predictable: owner-authored maintenance PRs can land
 without manual review friction, while external contributions still require an
 explicit current-head approval from `costa92`.
 
+That behavior is intentionally implemented in CI so the merge policy stays
+visible, reproducible, and testable across repos.
+
 The full multi-repo governance design, including the relationship between
 `llm-agent`, `llm-agent-providers`, `llm-agent-otel`, and
 `llm-agent-customer-support`, lives in the core repo docs:
