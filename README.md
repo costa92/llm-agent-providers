@@ -96,6 +96,10 @@ This repo now expects `.github/workflows/pr-governance.yml` to enforce a simple 
 
 This policy is designed to work with branch protection that requires the `go` and `governance` status checks, instead of GitHub's built-in required-approval gate.
 
+The intended outcome is predictable: owner-authored maintenance PRs can land
+without manual review friction, while external contributions still require an
+explicit current-head approval from `costa92`.
+
 The full multi-repo governance design, including the relationship between
 `llm-agent`, `llm-agent-providers`, `llm-agent-otel`, and
 `llm-agent-customer-support`, lives in the core repo docs:
