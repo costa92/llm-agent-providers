@@ -2,7 +2,7 @@
 
 Provider adapters for
 [`github.com/costa92/llm-agent`](https://github.com/costa92/llm-agent) —
-OpenAI, Anthropic, and Ollama. Each adapter implements the capability
+OpenAI, Anthropic, Ollama, DeepSeek, and MiniMax. Each adapter implements the capability
 interfaces from `llm-agent/llm` (`ChatModel`, `ToolCaller`, `Embedder`,
 `StructuredOutputs`).
 
@@ -13,7 +13,9 @@ against the post-compat-removal `llm-agent` `v0.4` core:
 - Anthropic: Generate, Stream, Tool calling, explicit `ErrNotSupported` for
   embeddings
 - Ollama: Generate, Stream, model-aware Tool calling, Embeddings
-- shared `internal/contract` conformance coverage across all three providers
+- DeepSeek: Generate, Stream, Tool calling
+- MiniMax: Generate, Stream, Tool calling
+- shared `internal/contract` conformance coverage in-repo
 - nightly Ollama live CI coverage
 
 ## Install
@@ -22,6 +24,8 @@ against the post-compat-removal `llm-agent` `v0.4` core:
 go get github.com/costa92/llm-agent-providers/openai@v0.1.0
 go get github.com/costa92/llm-agent-providers/anthropic@v0.1.0
 go get github.com/costa92/llm-agent-providers/ollama@v0.1.0
+go get github.com/costa92/llm-agent-providers/deepseek@v0.1.0
+go get github.com/costa92/llm-agent-providers/minimax@v0.1.0
 ```
 
 ## Shipped provider surface
@@ -49,6 +53,22 @@ go get github.com/costa92/llm-agent-providers/ollama@v0.1.0
 - streaming
 - per-model tool strategy support
 - embeddings
+
+### DeepSeek
+
+- `deepseek.New(...)` bound-model adapter
+- sync generate
+- streaming with usage capture
+- native function/tool calling
+- regional endpoint presets via `WithRegion(...)`
+
+### MiniMax
+
+- `minimax.New(...)` bound-model adapter
+- sync generate
+- streaming
+- native tool use
+- regional endpoint presets via `WithRegion(...)`
 
 ### Conformance
 
