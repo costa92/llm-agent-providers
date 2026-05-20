@@ -483,3 +483,194 @@ func readBody(t *testing.T, r *http.Request) string {
 	}
 	return string(b)
 }
+
+func TestStream_Ollama_NativeToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"llama3.1:8b","created_at":"2026-05-10T00:00:00Z","message":{"role":"assistant","content":"checking "},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"model":"llama3.1:8b","created_at":"2026-05-10T00:00:00Z","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_calc","function":{"index":0,"name":"calculator","arguments":{"expr":"2+2"}}}]},"done":true,"done_reason":"stop","prompt_eval_count":12,"eval_count":8}` + "\n"))
+	}))
+	defer server.Close()
+
+	base, err := New(WithModel("llama3.1:8b"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	m, err := base.WithTools([]llm.Tool{{Name: "calculator", Description: "calc", Parameters: []byte(`{"type":"object","properties":{"expr":{"type":"string"}}}`)}})
+	if err != nil {
+		t.Fatalf("WithTools(): %v", err)
+	}
+
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "2+2"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	defer sr.Close()
+
+	wantKinds := []llm.StreamEventKind{
+		llm.EventTextDelta,
+		llm.EventToolCallStart,
+		llm.EventToolCallArgsDelta,
+		llm.EventToolCallEnd,
+		llm.EventDone,
+	}
+	got := drainStreamEvents(t, sr, len(wantKinds))
+	if len(got) != len(wantKinds) {
+		t.Fatalf("event count = %d, want %d (events = %+v)", len(got), len(wantKinds), got)
+	}
+	for i, want := range wantKinds {
+		if got[i].Kind != want {
+			t.Fatalf("event[%d].Kind = %v, want %v (full = %+v)", i, got[i].Kind, want, got)
+		}
+	}
+	if got[0].Text != "checking " {
+		t.Fatalf("text delta = %q, want %q", got[0].Text, "checking ")
+	}
+	if got[1].ToolCall == nil || got[1].ToolCall.Index != 0 || got[1].ToolCall.ID != "call_calc" || got[1].ToolCall.Name != "calculator" {
+		t.Fatalf("ToolCallStart = %+v, want index=0 id=call_calc name=calculator", got[1].ToolCall)
+	}
+	if got[2].ToolCall == nil || got[2].ToolCall.Index != 0 || got[2].ToolCall.ArgsDelta != `{"expr":"2+2"}` {
+		t.Fatalf("ToolCallArgsDelta = %+v, want index=0 args=%q", got[2].ToolCall, `{"expr":"2+2"}`)
+	}
+	if got[3].ToolCall == nil || got[3].ToolCall.Index != 0 {
+		t.Fatalf("ToolCallEnd = %+v, want index=0", got[3].ToolCall)
+	}
+	if got[4].FinishReason != llm.FinishReasonToolCalls {
+		t.Fatalf("Done.FinishReason = %q, want %q", got[4].FinishReason, llm.FinishReasonToolCalls)
+	}
+	if got[4].Usage == nil || got[4].Usage.InputTokens != 12 || got[4].Usage.OutputTokens != 8 {
+		t.Fatalf("Done.Usage = %+v, want prompt=12 completion=8", got[4].Usage)
+	}
+}
+
+func TestStream_Ollama_QwenXMLContentToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"qwen3-coder:latest","created_at":"2026-05-11T00:00:00Z","message":{"role":"assistant","content":"Checking now.\n<tool_call>"},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"model":"qwen3-coder:latest","created_at":"2026-05-11T00:00:00Z","message":{"role":"assistant","content":"{\"name\":\"calculator\",\"arguments\":{\"expr\":\"2+2\"}}"},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"model":"qwen3-coder:latest","created_at":"2026-05-11T00:00:00Z","message":{"role":"assistant","content":"</tool_call>"},"done":true,"done_reason":"stop","prompt_eval_count":9,"eval_count":6}` + "\n"))
+	}))
+	defer server.Close()
+
+	base, err := New(WithModel("qwen3-coder:latest"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	m, err := base.WithTools([]llm.Tool{{Name: "calculator", Description: "calc", Parameters: []byte(`{"type":"object"}`)}})
+	if err != nil {
+		t.Fatalf("WithTools(): %v", err)
+	}
+
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "2+2"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	defer sr.Close()
+
+	events := drainAllEvents(t, sr)
+	// Content-parsed strategies MUST NOT leak raw tool markers as TextDelta.
+	for _, ev := range events {
+		if ev.Kind == llm.EventTextDelta && (strings.Contains(ev.Text, "<tool_call>") || strings.Contains(ev.Text, "</tool_call>")) {
+			t.Fatalf("text delta leaked tool markers: %q (full events = %+v)", ev.Text, events)
+		}
+	}
+	// Expected: at least one TextDelta with the stripped prelude, then tool events, then Done.
+	var sawStart, sawArgs, sawEnd, sawDone bool
+	var argsCombined string
+	var doneEvent llm.StreamEvent
+	for _, ev := range events {
+		switch ev.Kind {
+		case llm.EventToolCallStart:
+			if ev.ToolCall == nil || ev.ToolCall.Name != "calculator" {
+				t.Fatalf("ToolCallStart = %+v, want name=calculator", ev.ToolCall)
+			}
+			sawStart = true
+		case llm.EventToolCallArgsDelta:
+			if ev.ToolCall == nil {
+				t.Fatalf("ToolCallArgsDelta missing ToolCall")
+			}
+			argsCombined += ev.ToolCall.ArgsDelta
+			sawArgs = true
+		case llm.EventToolCallEnd:
+			sawEnd = true
+		case llm.EventDone:
+			sawDone = true
+			doneEvent = ev
+		}
+	}
+	if !sawStart || !sawArgs || !sawEnd || !sawDone {
+		t.Fatalf("missing K1 sequence: start=%v args=%v end=%v done=%v (events=%+v)", sawStart, sawArgs, sawEnd, sawDone, events)
+	}
+	if !strings.Contains(argsCombined, `"expr":"2+2"`) {
+		t.Fatalf("ArgsDelta combined = %q, want to contain expr=2+2", argsCombined)
+	}
+	if doneEvent.FinishReason != llm.FinishReasonToolCalls {
+		t.Fatalf("Done.FinishReason = %q, want FinishReasonToolCalls", doneEvent.FinishReason)
+	}
+}
+
+func TestStream_Ollama_NoToolsLeavesTextStreaming(t *testing.T) {
+	// Regression guard: when no tools are bound, streaming must remain
+	// chunk-by-chunk text deltas (no buffering even for content-parsed
+	// strategies). This preserves TestStream_Ollama_CancelMidStream's
+	// "first delta returns immediately" contract for tool-less callers.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"qwen3-coder:latest","created_at":"2026-05-11T00:00:00Z","message":{"role":"assistant","content":"hel"},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"model":"qwen3-coder:latest","created_at":"2026-05-11T00:00:00Z","message":{"role":"assistant","content":"lo"},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"model":"qwen3-coder:latest","created_at":"2026-05-11T00:00:00Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":5,"eval_count":2}` + "\n"))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("qwen3-coder:latest"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	sr, err := m.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	defer sr.Close()
+
+	ev, err := sr.Next()
+	if err != nil {
+		t.Fatalf("Next#1: %v", err)
+	}
+	if ev.Kind != llm.EventTextDelta || ev.Text != "hel" {
+		t.Fatalf("Next#1 = %+v, want TextDelta 'hel' (no buffering when tools unbound)", ev)
+	}
+}
+
+func drainStreamEvents(t *testing.T, sr llm.StreamReader, n int) []llm.StreamEvent {
+	t.Helper()
+	out := make([]llm.StreamEvent, 0, n)
+	for i := 0; i < n; i++ {
+		ev, err := sr.Next()
+		if err != nil {
+			t.Fatalf("Next#%d: %v", i+1, err)
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+func drainAllEvents(t *testing.T, sr llm.StreamReader) []llm.StreamEvent {
+	t.Helper()
+	out := make([]llm.StreamEvent, 0, 8)
+	for {
+		ev, err := sr.Next()
+		if err == io.EOF {
+			return out
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		out = append(out, ev)
+	}
+}
