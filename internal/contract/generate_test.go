@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/costa92/llm-agent-providers/anthropic"
+	"github.com/costa92/llm-agent-providers/deepseek"
+	"github.com/costa92/llm-agent-providers/minimax"
 	"github.com/costa92/llm-agent-providers/ollama"
 	"github.com/costa92/llm-agent-providers/openai"
 	"github.com/costa92/llm-agent/llm"
@@ -36,6 +38,20 @@ var AdapterFactories = map[string]ChatModelFactory{
 		return ollama.New(
 			ollama.WithModel("llama3.1:8b"),
 			ollama.WithBaseURL(baseURL),
+		)
+	},
+	"deepseek": func(baseURL string) (llm.ChatModel, error) {
+		return deepseek.New(
+			deepseek.WithModel("deepseek-chat"),
+			deepseek.WithAPIKey("test"),
+			deepseek.WithBaseURL(baseURL),
+		)
+	},
+	"minimax": func(baseURL string) (llm.ChatModel, error) {
+		return minimax.New(
+			minimax.WithModel("MiniMax-M1"),
+			minimax.WithAPIKey("test"),
+			minimax.WithBaseURL(baseURL),
 		)
 	},
 }
@@ -81,6 +97,8 @@ func TestGenerate_Conformance(t *testing.T) {
 		{"ollama", "generate_happy_llama3.1-8b"},
 		{"ollama", "generate_404_model_not_pulled"},
 		{"ollama", "generate_500_oom"},
+		{"deepseek", "generate_happy_deepseek-chat"},
+		{"minimax", "generate_happy_MiniMax-M1"},
 	}
 
 	for _, c := range cases {
@@ -108,6 +126,8 @@ func TestStream_Conformance(t *testing.T) {
 		{"openai", "stream_happy_gpt-4o-mini"},
 		{"anthropic", "stream_happy_claude-3-5-haiku"},
 		{"ollama", "stream_happy_llama3.1-8b"},
+		{"deepseek", "stream_happy_deepseek-chat"},
+		{"minimax", "stream_happy_MiniMax-M1"},
 	}
 
 	for _, c := range cases {
@@ -137,6 +157,8 @@ func TestToolCalling_Conformance(t *testing.T) {
 		{"anthropic", "tool_happy_claude-3-5-haiku"},
 		{"anthropic", "tool_multiblock_claude-3-5-haiku"},
 		{"ollama", "tool_happy_llama3.1-8b"},
+		{"deepseek", "tool_happy_deepseek-chat"},
+		{"minimax", "tool_happy_MiniMax-M1"},
 	}
 
 	for _, c := range cases {

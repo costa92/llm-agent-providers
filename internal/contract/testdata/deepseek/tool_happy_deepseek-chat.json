@@ -1,0 +1,39 @@
+{
+  "scenario": "tool_happy_deepseek-chat",
+  "tools": [
+    {
+      "name": "calculator",
+      "description": "Compute arithmetic expressions",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"expr\":{\"type\":\"string\"}},\"required\":[\"expr\"]}"
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/chat/completions",
+    "body_assertions": [
+      "\"tools\":[",
+      "\"name\":\"calculator\""
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "{\"id\":\"chatcmpl_ds_tool\",\"object\":\"chat.completion\",\"created\":1710000000,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_calc\",\"type\":\"function\",\"function\":{\"name\":\"calculator\",\"arguments\":\"{\\\"expr\\\":\\\"2+2\\\"}\"}}]},\"finish_reason\":\"tool_calls\",\"logprobs\":null}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4,\"total_tokens\":14}}"
+  },
+  "expect": {
+    "finish_reason": "tool_calls",
+    "usage_input_tokens": 10,
+    "usage_output_tokens": 4,
+    "usage_source": "reported",
+    "provider": "deepseek",
+    "tool_calls": [
+      {
+        "id": "call_calc",
+        "name": "calculator",
+        "arguments": "{\"expr\":\"2+2\"}"
+      }
+    ]
+  }
+}
