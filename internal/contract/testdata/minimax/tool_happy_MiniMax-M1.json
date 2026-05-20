@@ -1,0 +1,36 @@
+{
+  "scenario": "tool_happy_MiniMax-M1",
+  "tools": [
+    {
+      "name": "calculator",
+      "description": "Compute arithmetic expressions",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"expr\":{\"type\":\"string\"}},\"required\":[\"expr\"]}"
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "body_assertions": [
+      "\"tools\":[",
+      "\"name\":\"calculator\""
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "{\"id\":\"msg_mm_tool\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M1\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_calc\",\"name\":\"calculator\",\"input\":{\"expr\":\"2+2\"},\"caller\":{\"type\":\"direct\"}}],\"stop_reason\":\"tool_use\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":4}}"
+  },
+  "expect": {
+    "finish_reason": "tool_calls",
+    "provider": "minimax",
+    "tool_calls": [
+      {
+        "id": "toolu_calc",
+        "name": "calculator",
+        "arguments": "{\"expr\":\"2+2\"}"
+      }
+    ]
+  }
+}

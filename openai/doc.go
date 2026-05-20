@@ -1,11 +1,9 @@
-// Package openai implements the Phase-1 Generate-only adapter for
+// Package openai implements an OpenAI adapter over
 // github.com/openai/openai-go/v3.
 //
-// The adapter satisfies llm.ChatModel and intentionally reports all
-// optional capabilities as false in Phase 1:
-//   - tools
-//   - embeddings
-//   - structured outputs
-//
-// Streaming is deferred to Phase 2.
+// The adapter satisfies llm.ChatModel, llm.ToolCaller, and llm.Embedder.
+// Capabilities reported via Info() are per-(provider × model): the
+// constructor binds a model, and Info() reflects what that model can do
+// (Keystone K2). Streaming events follow the typed K1 union with stable
+// per-tool-call Index across deltas.
 package openai

@@ -1,0 +1,22 @@
+{
+  "scenario": "generate_happy_MiniMax-M1",
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "body_assertions": ["MiniMax-M1", "hello"]
+  },
+  "response": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"id\":\"msg_mm_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M1\",\"content\":[{\"type\":\"text\",\"text\":\"Hello from MiniMax\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":11,\"output_tokens\":7}}"
+  },
+  "expect": {
+    "error_type": "",
+    "response_text": "Hello from MiniMax",
+    "finish_reason": "stop",
+    "usage_input_tokens": 11,
+    "usage_output_tokens": 7,
+    "usage_source": "reported",
+    "provider": "minimax"
+  }
+}

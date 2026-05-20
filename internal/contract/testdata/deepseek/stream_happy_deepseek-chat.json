@@ -1,0 +1,26 @@
+{
+  "scenario": "stream_happy_deepseek-chat",
+  "request": {
+    "method": "POST",
+    "path": "/chat/completions",
+    "body_assertions": [
+      "\"include_usage\":true",
+      "deepseek-chat"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "text/event-stream"
+    },
+    "body": "data: {\"id\":\"chatcmpl_ds\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"},\"finish_reason\":\"\"}]}\n\ndata: {\"id\":\"chatcmpl_ds\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"id\":\"chatcmpl_ds\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"deepseek-chat\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\ndata: [DONE]\n\n"
+  },
+  "expect": {
+    "response_text": "hello",
+    "finish_reason": "stop",
+    "usage_input_tokens": 11,
+    "usage_output_tokens": 7,
+    "usage_source": "reported",
+    "provider": "deepseek"
+  }
+}

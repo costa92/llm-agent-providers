@@ -6,8 +6,8 @@ OpenAI, Anthropic, Ollama, DeepSeek, and MiniMax. Each adapter implements the ca
 interfaces from `llm-agent/llm` (`ChatModel`, `ToolCaller`, `Embedder`,
 `StructuredOutputs`).
 
-This repo now ships the full Phase 1-4 provider surface and has been verified
-against the post-compat-removal `llm-agent` `v0.4` core:
+This repo ships the full provider surface verified against the
+`llm-agent v0.5.1` core (the v1.1 ecosystem-alignment back-edge):
 
 - OpenAI: Generate, Stream, Tool calling, Embeddings
 - Anthropic: Generate, Stream, Tool calling, explicit `ErrNotSupported` for
@@ -103,9 +103,10 @@ The `release-precheck` CI workflow rejects any non-empty `replace` block on bran
 
 ## Versioning
 
-This repo is already code-compatible with the `llm-agent v0.4` core surface.
-Its local release-prep state now targets `github.com/costa92/llm-agent v0.4.0`.
-The only remaining Phase 7 follow-up is publishing the final coordinated tags.
+This repo tracks the `llm-agent` core surface. As of v0.2.0 it pins
+`github.com/costa92/llm-agent v0.5.1` (the v1.1 ecosystem-alignment
+cascade back-edge). Cross-repo bump waves follow the umbrella's
+"coordinated bump + re-tag" pattern (umbrella Phase 33).
 
 ## PR automation
 
@@ -136,7 +137,7 @@ The full multi-repo governance design, including the relationship between
 
 - [`llm-agent` CLAUDE.md](https://github.com/costa92/llm-agent/blob/main/CLAUDE.md) — project hard rules (stdlib-only core, no K8s, capability per-(provider x model)).
 - [`llm-agent` ROADMAP](https://github.com/costa92/llm-agent/blob/main/.planning/ROADMAP.md) — 8-phase v0.3 milestone plan.
-- [`DEPRECATIONS.md`](https://github.com/costa92/llm-agent/blob/main/DEPRECATIONS.md) — symbols on the v0.4 removal track.
+- [`DEPRECATIONS.md`](https://github.com/costa92/llm-agent/blob/main/DEPRECATIONS.md) — current `llm-agent` removal track.
 
 ## License
 
