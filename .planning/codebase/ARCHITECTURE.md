@@ -278,7 +278,7 @@ There is no top-level `providers` aggregator package and no factory dispatch by 
 **Patterns:**
 - Each provider owns its own `wrapErr` in `*/errors.go`. No shared helper.
 - Status extraction uses `errors.As(err, &<sdk.Error>)`. Ollama additionally uses an atomic-int32 last-status because the Ollama SDK doesn't always carry status on the error.
-- `Retry-After` parsing: OpenAI + DeepSeek only.
+- `Retry-After` parsing: OpenAI, DeepSeek, Anthropic, and MiniMax (P1-9, 2026-05-22). Ollama has no `http.Response` on its `api.StatusError` value type, so it remains unparsed — tracked as a follow-up.
 - `internal/contract/generate_test.go:355-380` `TestErrorString_NoSecretLeak` asserts that the wrapped error chain preserves `errors.Is` traversal to the inner error (so callers can still inspect it) but does not assert redaction is performed.
 
 ## Cross-Cutting Concerns

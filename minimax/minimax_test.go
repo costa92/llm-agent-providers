@@ -545,6 +545,110 @@ func TestGenerate_MiniMax_500TransientError(t *testing.T) {
 	})
 }
 
+func TestGenerate_MiniMax_429SetsRetryAfterSeconds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("MiniMax-M1"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want non-nil")
+	}
+	var target *llm.RateLimitError
+	if !errors.As(err, &target) {
+		t.Fatalf("errors.As(err, *llm.RateLimitError) = false, err=%T %v", err, err)
+	}
+	if target.RetryAfter != "30" {
+		t.Fatalf("RetryAfter = %q, want 30", target.RetryAfter)
+	}
+}
+
+func TestGenerate_MiniMax_429SetsRetryAfterHTTPDate(t *testing.T) {
+	const when = "Wed, 21 Oct 2026 07:28:00 GMT"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", when)
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("MiniMax-M1"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want non-nil")
+	}
+	var target *llm.RateLimitError
+	if !errors.As(err, &target) {
+		t.Fatalf("errors.As(err, *llm.RateLimitError) = false, err=%T %v", err, err)
+	}
+	if target.RetryAfter != when {
+		t.Fatalf("RetryAfter = %q, want %q (raw RFC 7231 string per contract)", target.RetryAfter, when)
+	}
+}
+
+func TestGenerate_MiniMax_529SetsRetryAfter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "120")
+		w.WriteHeader(529)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("MiniMax-M1"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want non-nil")
+	}
+	var target *llm.RateLimitError
+	if !errors.As(err, &target) {
+		t.Fatalf("errors.As(err, *llm.RateLimitError) = false, err=%T %v", err, err)
+	}
+	if target.RetryAfter != "120" {
+		t.Fatalf("RetryAfter = %q, want 120", target.RetryAfter)
+	}
+}
+
+func TestGenerate_MiniMax_429EmptyRetryAfterWhenHeaderMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("MiniMax-M1"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want non-nil")
+	}
+	var target *llm.RateLimitError
+	if !errors.As(err, &target) {
+		t.Fatalf("errors.As(err, *llm.RateLimitError) = false, err=%T %v", err, err)
+	}
+	if target.RetryAfter != "" {
+		t.Fatalf("RetryAfter = %q, want empty string when header absent", target.RetryAfter)
+	}
+}
+
 func assertMiniMaxTypedError(t *testing.T, status int, body string, match func(error) bool) {
 	t.Helper()
 

@@ -83,9 +83,9 @@ PromptCaching:     false,
 
 **Rate-limit handling:**
 - `errors.As(err, *sdk.Error)` (`anthropic/errors.go:25`).
-- 429 → `*llm.RateLimitError`; **529 (`overloaded_error`) → `*llm.RateLimitError`** (`anthropic/errors.go:30-33`). This is an Anthropic-specific bucket called out in the README (`anthropic/README.md:21`).
+- 429 → `*llm.RateLimitError` with `RetryAfter` lifted from the `Retry-After` header; **529 (`overloaded_error`) → `*llm.RateLimitError`** (same `RetryAfter` lift) (`anthropic/errors.go:30-41`). The 529 bucket is an Anthropic-specific status called out in the README (`anthropic/README.md:21`).
 - 5xx → `*llm.TransientError`; 401/403 → `*llm.AuthError`; other 4xx → `*llm.InvalidRequestError`.
-- `Retry-After` is *not* parsed for Anthropic (`RateLimitError.RetryAfter` left empty).
+- `Retry-After` is now parsed (P1-9, 2026-05-22) — raw RFC 7231 string passthrough matching `openai/errors.go` and `deepseek/errors.go`. Consumers parse seconds vs. HTTP-date themselves per the `llm.RateLimitError.RetryAfter` contract.
 
 **Tool calling:**
 - Native `tool_use` blocks via `sdk.ToolParam` + `sdk.ToolChoiceUnionParam{OfAuto: ...}` (`anthropic/map.go:43-58`).
@@ -244,7 +244,7 @@ Does NOT satisfy `llm.Embedder` (`minimax/minimax.go:13-16`).
 - Timeout via `WithTimeout(d)` (`minimax/options.go:83-85`).
 
 **Rate-limit handling:**
-- Same as Anthropic: 429 → `*llm.RateLimitError`, **529 → `*llm.RateLimitError`** (`minimax/errors.go:28-33`). No `Retry-After` parsing.
+- Same as Anthropic: 429 → `*llm.RateLimitError`, **529 → `*llm.RateLimitError`** with `RetryAfter` lifted from the `Retry-After` header (`minimax/errors.go:28-41`). `Retry-After` is now parsed (P1-9, 2026-05-22) — same raw string passthrough as Anthropic.
 
 **Tool calling:**
 - Same Anthropic schema path (`minimax/map.go:43-58`, `:108-145`).
@@ -267,7 +267,7 @@ Does NOT satisfy `llm.Embedder` (`minimax/minimax.go:13-16`).
 | Stream emits tool-call deltas | yes | yes | **no** | yes | yes |
 | Vision / multimodal request | no | no | no | no | no |
 | Retry/backoff (internal) | none (`MaxRetries=0`) | none | none | none | none |
-| Parses `Retry-After` | yes | no | n/a | yes | no |
+| Parses `Retry-After` | yes | yes | n/a | yes | yes |
 
 ## Credential Surface (consolidated)
 
