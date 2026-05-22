@@ -88,14 +88,9 @@ func New(opts ...Option) (*MiniMax, error) {
 	return &MiniMax{
 		client: &client,
 		info: llm.ProviderInfo{
-			Provider: "minimax",
-			Model:    cfg.model,
-			Capabilities: llm.Capabilities{
-				Tools:             true,
-				Embeddings:        false,
-				StructuredOutputs: false,
-				PromptCaching:     false,
-			},
+			Provider:     "minimax",
+			Model:        cfg.model,
+			Capabilities: capabilitiesForModel(cfg.model),
 		},
 	}, nil
 }
