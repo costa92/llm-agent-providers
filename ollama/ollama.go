@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/costa92/llm-agent/llm"
 	api "github.com/ollama/ollama/api"
@@ -19,18 +21,28 @@ var (
 )
 
 type Ollama struct {
-	client         *api.Client
-	info           llm.ProviderInfo
-	lastStatus     *int32
-	lastRetryAfter *atomic.Pointer[string]
-	tools          []llm.Tool
-	strategy       ollamaToolStrategy
+	// P1-6 ollama 5/5: sync and stream paths route through distinct
+	// *api.Client / *http.Client pairs so the default 60s request timeout
+	// (Generate/Embed) does not cut long streams (Stream uses Timeout=0,
+	// ctx-only). Both *http.Clients share the same *statusCapturingTransport
+	// so lastStatus / lastRetryAfter remain reference-identical across paths.
+	syncClient   *api.Client
+	streamClient *api.Client
+
+	info             llm.ProviderInfo
+	timeout          time.Duration
+	syncHTTPClient   *http.Client
+	streamHTTPClient *http.Client
+	lastStatus       *int32
+	lastRetryAfter   *atomic.Pointer[string]
+	tools            []llm.Tool
+	strategy         ollamaToolStrategy
 }
 
 func (o *Ollama) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
 	sdkReq := o.toSDKRequest(req)
 	var captured api.ChatResponse
-	err := o.client.Chat(ctx, sdkReq, func(resp api.ChatResponse) error {
+	err := o.syncClient.Chat(ctx, sdkReq, func(resp api.ChatResponse) error {
 		captured = resp
 		return nil
 	})
@@ -54,7 +66,7 @@ func (o *Ollama) Stream(ctx context.Context, req llm.Request) (llm.StreamReader,
 	go func() {
 		defer close(sr.respCh)
 		sdkReq := o.toSDKStreamRequest(req)
-		err := o.client.Chat(ctx, sdkReq, func(resp api.ChatResponse) error {
+		err := o.streamClient.Chat(ctx, sdkReq, func(resp api.ChatResponse) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -87,7 +99,7 @@ func (o *Ollama) Embed(ctx context.Context, texts []string) ([]llm.Vector, llm.U
 	if len(texts) == 0 {
 		return []llm.Vector{}, llm.Usage{Source: llm.UsageReported}, nil
 	}
-	resp, err := o.client.Embed(ctx, &api.EmbedRequest{
+	resp, err := o.syncClient.Embed(ctx, &api.EmbedRequest{
 		Model: o.info.Model,
 		Input: append([]string(nil), texts...),
 	})
@@ -324,3 +336,15 @@ func (r *ollamaStreamReader) Close() error {
 	r.cancel()
 	return nil
 }
+
+// effectiveTimeoutForTest exposes the resolved cfg.timeout (default-or-
+// explicit) to package-internal tests. Not part of the public API.
+func (o *Ollama) effectiveTimeoutForTest() time.Duration { return o.timeout }
+
+// syncHTTPClientForTest returns the *http.Client backing Generate/Embed
+// so internal tests can assert Timeout and Transport identity.
+func (o *Ollama) syncHTTPClientForTest() *http.Client { return o.syncHTTPClient }
+
+// streamHTTPClientForTest returns the *http.Client backing Stream so
+// internal tests can assert Timeout=0 and shared-transport identity.
+func (o *Ollama) streamHTTPClientForTest() *http.Client { return o.streamHTTPClient }
