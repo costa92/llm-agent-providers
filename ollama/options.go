@@ -33,14 +33,21 @@ func WithHTTPClient(h *http.Client) Option { return func(c *config) { c.httpClie
 func WithTimeout(d time.Duration) Option { return func(c *config) { c.timeout = d } }
 
 type statusCapturingTransport struct {
-	inner http.RoundTripper
-	last  *int32
+	inner          http.RoundTripper
+	last           *int32
+	lastRetryAfter *atomic.Pointer[string]
 }
 
 func (t *statusCapturingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.inner.RoundTrip(req)
 	if resp != nil {
 		atomic.StoreInt32(t.last, int32(resp.StatusCode))
+		// Reset every call (including empty) so a prior request's
+		// Retry-After can't bleed into the next 429's wrapErr lookup.
+		if t.lastRetryAfter != nil {
+			ra := resp.Header.Get("Retry-After")
+			t.lastRetryAfter.Store(&ra)
+		}
 	}
 	return resp, err
 }
@@ -71,6 +78,7 @@ func New(opts ...Option) (*Ollama, error) {
 	}
 
 	lastStatus := new(int32)
+	lastRetryAfter := &atomic.Pointer[string]{}
 	strategy := strategyForModel(cfg.model)
 	embedDim := embeddingDimensionForModel(cfg.model)
 	httpClient := cfg.httpClient
@@ -88,15 +96,17 @@ func New(opts ...Option) (*Ollama, error) {
 		inner = http.DefaultTransport
 	}
 	httpClient.Transport = &statusCapturingTransport{
-		inner: inner,
-		last:  lastStatus,
+		inner:          inner,
+		last:           lastStatus,
+		lastRetryAfter: lastRetryAfter,
 	}
 
 	client := api.NewClient(u, httpClient)
 	return &Ollama{
-		client:     client,
-		lastStatus: lastStatus,
-		strategy:   strategy,
+		client:         client,
+		lastStatus:     lastStatus,
+		lastRetryAfter: lastRetryAfter,
+		strategy:       strategy,
 		info: llm.ProviderInfo{
 			Provider: "ollama",
 			Model:    cfg.model,

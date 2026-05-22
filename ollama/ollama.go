@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/costa92/llm-agent/llm"
 	api "github.com/ollama/ollama/api"
@@ -18,11 +19,12 @@ var (
 )
 
 type Ollama struct {
-	client     *api.Client
-	info       llm.ProviderInfo
-	lastStatus *int32
-	tools      []llm.Tool
-	strategy   ollamaToolStrategy
+	client         *api.Client
+	info           llm.ProviderInfo
+	lastStatus     *int32
+	lastRetryAfter *atomic.Pointer[string]
+	tools          []llm.Tool
+	strategy       ollamaToolStrategy
 }
 
 func (o *Ollama) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
