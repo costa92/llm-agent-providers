@@ -5,6 +5,7 @@ import (
 	"io"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/costa92/llm-agent/llm"
 	openai "github.com/openai/openai-go/v3"
@@ -17,9 +18,10 @@ var (
 )
 
 type DeepSeek struct {
-	client *openai.Client
-	info   llm.ProviderInfo
-	tools  []llm.Tool
+	client  *openai.Client
+	info    llm.ProviderInfo
+	tools   []llm.Tool
+	timeout time.Duration
 }
 
 func (d *DeepSeek) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
