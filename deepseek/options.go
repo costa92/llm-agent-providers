@@ -88,14 +88,9 @@ func New(opts ...Option) (*DeepSeek, error) {
 	return &DeepSeek{
 		client: &client,
 		info: llm.ProviderInfo{
-			Provider: "deepseek",
-			Model:    cfg.model,
-			Capabilities: llm.Capabilities{
-				Tools:             true,
-				Embeddings:        false,
-				StructuredOutputs: false,
-				PromptCaching:     false,
-			},
+			Provider:     "deepseek",
+			Model:        cfg.model,
+			Capabilities: capabilitiesForModel(cfg.model),
 		},
 	}, nil
 }
