@@ -28,9 +28,17 @@ func wrapErr(err error) error {
 		case 401, 403:
 			return &llm.AuthError{Provider: "anthropic", Wrapped: err}
 		case 429:
-			return &llm.RateLimitError{Provider: "anthropic", Wrapped: err}
+			retryAfter := ""
+			if apiErr.Response != nil {
+				retryAfter = apiErr.Response.Header.Get("Retry-After")
+			}
+			return &llm.RateLimitError{Provider: "anthropic", RetryAfter: retryAfter, Wrapped: err}
 		case 529:
-			return &llm.RateLimitError{Provider: "anthropic", Wrapped: err}
+			retryAfter := ""
+			if apiErr.Response != nil {
+				retryAfter = apiErr.Response.Header.Get("Retry-After")
+			}
+			return &llm.RateLimitError{Provider: "anthropic", RetryAfter: retryAfter, Wrapped: err}
 		case 500, 502, 503, 504:
 			return &llm.TransientError{Provider: "anthropic", Wrapped: err}
 		default:
