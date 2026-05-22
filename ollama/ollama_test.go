@@ -450,6 +450,123 @@ func TestGenerate_Ollama_400InvalidRequestError(t *testing.T) {
 	})
 }
 
+// P1-9: 429 must reclassify as *llm.RateLimitError (not InvalidRequestError)
+// and lift the raw Retry-After header value into RetryAfter (string per contract;
+// consumers parse). 4 cases cover numeric seconds, RFC 7231 HTTP-date, absent
+// header, and a 5xx-with-Retry-After regression guard that keeps the
+// TransientError path intact.
+
+func TestGenerate_Ollama_429SetsRetryAfterSeconds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("llama3.1:8b"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want non-nil")
+	}
+	var target *llm.RateLimitError
+	if !errors.As(err, &target) {
+		t.Fatalf("errors.As(err, *llm.RateLimitError) = false, err=%T %v", err, err)
+	}
+	if target.RetryAfter != "30" {
+		t.Fatalf("RetryAfter = %q, want 30", target.RetryAfter)
+	}
+	if target.Provider != "ollama" {
+		t.Fatalf("Provider = %q, want ollama", target.Provider)
+	}
+}
+
+func TestGenerate_Ollama_429SetsRetryAfterHTTPDate(t *testing.T) {
+	const when = "Wed, 21 Oct 2026 07:28:00 GMT"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", when)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("llama3.1:8b"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want non-nil")
+	}
+	var target *llm.RateLimitError
+	if !errors.As(err, &target) {
+		t.Fatalf("errors.As(err, *llm.RateLimitError) = false, err=%T %v", err, err)
+	}
+	if target.RetryAfter != when {
+		t.Fatalf("RetryAfter = %q, want %q (raw RFC 7231 string per contract)", target.RetryAfter, when)
+	}
+}
+
+func TestGenerate_Ollama_429EmptyRetryAfterWhenHeaderMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("llama3.1:8b"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want non-nil")
+	}
+	var target *llm.RateLimitError
+	if !errors.As(err, &target) {
+		t.Fatalf("errors.As(err, *llm.RateLimitError) = false, err=%T %v", err, err)
+	}
+	if target.RetryAfter != "" {
+		t.Fatalf("RetryAfter = %q, want empty string when header absent", target.RetryAfter)
+	}
+}
+
+// Regression guard: 5xx with Retry-After must remain a TransientError —
+// the Retry-After lift is gated on 429 only and must not change the
+// classification of other status codes.
+func TestGenerate_Ollama_503WithRetryAfterStaysTransient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "5")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"service unavailable"}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("llama3.1:8b"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want non-nil")
+	}
+	var transient *llm.TransientError
+	if !errors.As(err, &transient) {
+		t.Fatalf("errors.As(err, *llm.TransientError) = false, err=%T %v", err, err)
+	}
+	var rl *llm.RateLimitError
+	if errors.As(err, &rl) {
+		t.Fatalf("503 must not lift to *RateLimitError, got %T %v", err, err)
+	}
+}
+
 func assertOllamaTypedError(t *testing.T, status int, body string, match func(error) bool) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
