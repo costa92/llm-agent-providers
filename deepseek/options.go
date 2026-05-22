@@ -63,6 +63,14 @@ func New(opts ...Option) (*DeepSeek, error) {
 	if cfg.apiKey == "" {
 		cfg.apiKey = os.Getenv("DEEPSEEK_API_KEY")
 	}
+	// P1-6: default 60s request timeout when caller is silent. Guards
+	// against indefinite hangs on idle HTTP connections. SDK applies
+	// this per-request via option.WithRequestTimeout, so streaming is
+	// NOT capped by a client-level Timeout — caller ctx still governs
+	// long-running streams.
+	if cfg.timeout == 0 {
+		cfg.timeout = 60 * time.Second
+	}
 
 	baseURL := cfg.baseURL
 	if baseURL == "" {
@@ -86,7 +94,8 @@ func New(opts ...Option) (*DeepSeek, error) {
 
 	client := openai.NewClient(sdkOpts...)
 	return &DeepSeek{
-		client: &client,
+		client:  &client,
+		timeout: cfg.timeout,
 		info: llm.ProviderInfo{
 			Provider:     "deepseek",
 			Model:        cfg.model,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"time"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
@@ -16,9 +17,10 @@ var (
 )
 
 type MiniMax struct {
-	client *sdk.Client
-	info   llm.ProviderInfo
-	tools  []llm.Tool
+	client  *sdk.Client
+	info    llm.ProviderInfo
+	tools   []llm.Tool
+	timeout time.Duration
 }
 
 func (m *MiniMax) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {

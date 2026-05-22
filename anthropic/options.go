@@ -45,6 +45,14 @@ func New(opts ...Option) (*Anthropic, error) {
 	if cfg.apiKey == "" {
 		cfg.apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
+	// P1-6: default 60s request timeout when caller is silent. Guards
+	// against indefinite hangs on idle HTTP connections. SDK applies
+	// this per-request via option.WithRequestTimeout, so streaming is
+	// NOT capped by a client-level Timeout — caller ctx still governs
+	// long-running streams.
+	if cfg.timeout == 0 {
+		cfg.timeout = 60 * time.Second
+	}
 
 	var sdkOpts []option.RequestOption
 	sdkOpts = append(sdkOpts, option.WithMaxRetries(0))
@@ -66,7 +74,8 @@ func New(opts ...Option) (*Anthropic, error) {
 
 	client := sdk.NewClient(sdkOpts...)
 	return &Anthropic{
-		client: &client,
+		client:  &client,
+		timeout: cfg.timeout,
 		info: llm.ProviderInfo{
 			Provider: "anthropic",
 			Model:    cfg.model,
