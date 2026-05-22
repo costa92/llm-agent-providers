@@ -431,7 +431,12 @@ func TestGenerate_Ollama_NoDaemonTransientError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
-	_, err = m.Generate(context.Background(), llm.Request{
+	// Use a short deadline so the "no daemon listening" path stays
+	// deterministic even on runners where loopback connect attempts do not
+	// fail immediately.
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	_, err = m.Generate(ctx, llm.Request{
 		Messages: []llm.Message{{Role: "user", Content: "hi"}},
 	})
 	if err == nil {
