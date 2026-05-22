@@ -286,6 +286,8 @@ func TestStream_CancelMidStream_Conformance(t *testing.T) {
 		{"openai", openaiCancelHandler(t)},
 		{"anthropic", anthropicCancelHandler(t)},
 		{"ollama", ollamaCancelHandler(t)},
+		{"deepseek", deepseekCancelHandler(t)},
+		{"minimax", minimaxCancelHandler(t)},
 	}
 
 	for _, c := range cases {
@@ -337,6 +339,8 @@ func TestStream_PartialUsageOnError_Conformance(t *testing.T) {
 		{"openai", openaiErrorAfterFirstByteHandler()},
 		{"anthropic", anthropicErrorAfterFirstByteHandler()},
 		{"ollama", ollamaErrorAfterFirstByteHandler()},
+		{"deepseek", deepseekErrorAfterFirstByteHandler()},
+		{"minimax", minimaxErrorAfterFirstByteHandler()},
 	}
 
 	for _, c := range cases {
@@ -480,6 +484,62 @@ func ollamaErrorAfterFirstByteHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		_, _ = fmt.Fprint(w, "{\"model\":\"llama3.1:8b\",\"created_at\":\"2026-05-10T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"par\"},\"done\":false}\n")
 		_, _ = fmt.Fprint(w, "internal server error\n")
+	}
+}
+
+func deepseekCancelHandler(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		body := readBody(t, r)
+		if !strings.Contains(body, `"include_usage":true`) {
+			t.Errorf(`request body missing "include_usage":true: %s`, body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer missing Flusher")
+		}
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"par\"},\"finish_reason\":\"\"}]}\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+	}
+}
+
+func minimaxCancelHandler(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		body := readBody(t, r)
+		if !strings.Contains(body, `"stream":true`) {
+			t.Errorf(`request body missing "stream":true: %s`, body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer missing Flusher")
+		}
+		_, _ = fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M1\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":3,\"output_tokens\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"par\"}}\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+	}
+}
+
+func deepseekErrorAfterFirstByteHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"par\"},\"finish_reason\":\"\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"error\":{\"message\":\"stream interrupted\"}}\n\n")
+	}
+}
+
+func minimaxErrorAfterFirstByteHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M1\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":3,\"output_tokens\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"par\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"stream interrupted\"}}\n\n")
 	}
 }
 
