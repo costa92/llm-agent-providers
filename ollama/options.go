@@ -81,32 +81,59 @@ func New(opts ...Option) (*Ollama, error) {
 	lastRetryAfter := &atomic.Pointer[string]{}
 	strategy := strategyForModel(cfg.model)
 	embedDim := embeddingDimensionForModel(cfg.model)
-	httpClient := cfg.httpClient
-	if httpClient == nil {
-		httpClient = &http.Client{}
+
+	// P1-6 (ollama 5/5): default 60s request timeout when caller is silent.
+	// Guards against indefinite hangs on idle connections at upstream Ollama.
+	// ollama-go SDK v0.23.2 exposes no per-request timeout option and its
+	// Client.http field is private, so the only clean path is to derive
+	// two *http.Client wrapping the SAME *statusCapturingTransport:
+	//
+	//   - syncClient.Timeout  = cfg.timeout  (default 60s) → Generate, Embed
+	//   - streamClient.Timeout = 0           (ctx-only)    → Stream
+	//
+	// Sharing the transport instance preserves lastStatus + lastRetryAfter
+	// reference identity, so 429/Retry-After detection on any path remains
+	// observable from wrapErr regardless of which client made the call.
+	if cfg.timeout == 0 && (cfg.httpClient == nil || cfg.httpClient.Timeout == 0) {
+		cfg.timeout = 60 * time.Second
+	}
+
+	// Resolve the inner RoundTripper (caller-supplied or default) ONCE so
+	// both derived clients route through the same status-capturing wrapper.
+	var inner http.RoundTripper
+	if cfg.httpClient != nil && cfg.httpClient.Transport != nil {
+		inner = cfg.httpClient.Transport
 	} else {
-		cp := *httpClient
-		httpClient = &cp
-	}
-	if cfg.timeout > 0 {
-		httpClient.Timeout = cfg.timeout
-	}
-	inner := httpClient.Transport
-	if inner == nil {
 		inner = http.DefaultTransport
 	}
-	httpClient.Transport = &statusCapturingTransport{
+	sharedTransport := &statusCapturingTransport{
 		inner:          inner,
 		last:           lastStatus,
 		lastRetryAfter: lastRetryAfter,
 	}
 
-	client := api.NewClient(u, httpClient)
+	// Derived clients: only the *http.Client is cloned; the transport
+	// instance is shared (Trap 2 — copying the transport would split
+	// lastStatus/lastRetryAfter and stream-path errors would lose state
+	// set by a prior sync-path RoundTrip).
+	syncClient := &http.Client{
+		Transport: sharedTransport,
+		Timeout:   cfg.timeout,
+	}
+	streamClient := &http.Client{
+		Transport: sharedTransport,
+		Timeout:   0,
+	}
+
 	return &Ollama{
-		client:         client,
-		lastStatus:     lastStatus,
-		lastRetryAfter: lastRetryAfter,
-		strategy:       strategy,
+		syncClient:       api.NewClient(u, syncClient),
+		streamClient:     api.NewClient(u, streamClient),
+		timeout:          cfg.timeout,
+		syncHTTPClient:   syncClient,
+		streamHTTPClient: streamClient,
+		lastStatus:       lastStatus,
+		lastRetryAfter:   lastRetryAfter,
+		strategy:         strategy,
 		info: llm.ProviderInfo{
 			Provider: "ollama",
 			Model:    cfg.model,
