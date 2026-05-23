@@ -46,6 +46,16 @@ type Fixture struct {
 			Name      string `json:"name"`
 			Arguments string `json:"arguments"`
 		} `json:"tool_calls,omitempty"`
+		// StreamSequence is the flat list of expected Kind names in order, used by
+		// AssertStreamToolCalls to pin K1 conformance. Valid entries:
+		//   "text"        EventTextDelta
+		//   "tool_start"  EventToolCallStart
+		//   "tool_args"   EventToolCallArgsDelta
+		//   "tool_end"    EventToolCallEnd
+		//   "thinking"    EventThinkingDelta
+		//   "done"        EventDone
+		// When empty, AssertStreamToolCalls is not run.
+		StreamSequence []string `json:"stream_sequence,omitempty"`
 	} `json:"expect"`
 }
 
@@ -123,6 +133,193 @@ func AssertStream(t *testing.T, model llm.ChatModel, f Fixture) {
 		resp.Model = info.Model
 	}
 	assertResponse(t, resp, err, f, "Stream")
+}
+
+// AssertStreamToolCalls drains the stream WITHOUT AccumulateStream collapse,
+// pinning K1 conformance: Kind sequence matches Expect.StreamSequence and
+// per-Index ToolCall payload satisfies the per-Kind population rules from
+// llm/stream.go:33-40.
+//
+// Index stability invariant: across Start → ArgsDelta(s) → End for a single
+// tool call, Index is identical. After End for an Index, that Index must not
+// be reused for a later Start.
+//
+// When f.Expect.ToolCalls is non-empty, the accumulated (Name, Arguments)
+// pairs per Index are verified against the expected final tool calls.
+func AssertStreamToolCalls(t *testing.T, model llm.ChatModel, f Fixture) {
+	t.Helper()
+	if len(f.Expect.StreamSequence) == 0 {
+		t.Fatal("AssertStreamToolCalls: fixture has empty Expect.StreamSequence")
+	}
+
+	tools := make([]llm.Tool, 0, len(f.Tools))
+	for _, tool := range f.Tools {
+		tools = append(tools, llm.Tool{
+			Name:        tool.Name,
+			Description: tool.Description,
+			Parameters:  []byte(tool.Parameters),
+		})
+	}
+
+	bound := model
+	if len(tools) > 0 {
+		tc, ok := model.(llm.ToolCaller)
+		if !ok {
+			t.Fatalf("model %T does not implement llm.ToolCaller", model)
+		}
+		b, err := tc.WithTools(tools)
+		if err != nil {
+			t.Fatalf("WithTools: %v", err)
+		}
+		bound = b
+	}
+
+	req := llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "use tools"}},
+	}
+	sr, err := bound.Stream(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer sr.Close()
+
+	events := make([]llm.StreamEvent, 0, len(f.Expect.StreamSequence))
+	for {
+		ev, err := sr.Next()
+		if err != nil {
+			if isEOFErr(err) {
+				break
+			}
+			t.Fatalf("Next: %v", err)
+		}
+		events = append(events, ev)
+		if ev.Kind == llm.EventDone {
+			// EventDone is terminal per K1 contract; subsequent reads should
+			// return io.EOF. Don't break here so we exercise that.
+		}
+	}
+
+	// 1. Kind sequence equals expected.
+	got := make([]string, 0, len(events))
+	for _, ev := range events {
+		got = append(got, kindName(ev.Kind))
+	}
+	if len(got) != len(f.Expect.StreamSequence) {
+		t.Fatalf("stream kind count: got %d %v, want %d %v", len(got), got, len(f.Expect.StreamSequence), f.Expect.StreamSequence)
+	}
+	for i, want := range f.Expect.StreamSequence {
+		if got[i] != want {
+			t.Fatalf("stream kind[%d]: got %q want %q (full got=%v want=%v)", i, got[i], want, got, f.Expect.StreamSequence)
+		}
+	}
+
+	// 2. Per-Kind payload + Index stability invariants.
+	// seenIndices state: 0 = unseen, 1 = started, 2 = ended.
+	seenIndices := map[int]int{}
+	// argsByIndex accumulates ArgsDelta concatenation per Index for the optional
+	// ToolCalls cross-check below.
+	argsByIndex := map[int]string{}
+	nameByIndex := map[int]string{}
+	idByIndex := map[int]string{}
+	indexOrder := make([]int, 0)
+	for i, ev := range events {
+		switch ev.Kind {
+		case llm.EventTextDelta, llm.EventThinkingDelta:
+			if ev.Text == "" {
+				t.Errorf("event[%d] kind=%v: empty Text (K1 rule: text/thinking must populate Text)", i, ev.Kind)
+			}
+		case llm.EventToolCallStart:
+			if ev.ToolCall == nil {
+				t.Fatalf("event[%d] EventToolCallStart: ToolCall == nil", i)
+			}
+			if ev.ToolCall.Index < 0 {
+				t.Errorf("event[%d] EventToolCallStart: Index = %d, want >= 0", i, ev.ToolCall.Index)
+			}
+			if ev.ToolCall.Name == "" {
+				t.Errorf("event[%d] EventToolCallStart: Name is empty (K1 rule)", i)
+			}
+			if state := seenIndices[ev.ToolCall.Index]; state == 2 {
+				t.Errorf("event[%d] EventToolCallStart: Index %d reused after End (K1 rule: indices unique post-End)", i, ev.ToolCall.Index)
+			}
+			seenIndices[ev.ToolCall.Index] = 1
+			nameByIndex[ev.ToolCall.Index] = ev.ToolCall.Name
+			if ev.ToolCall.ID != "" {
+				idByIndex[ev.ToolCall.Index] = ev.ToolCall.ID
+			}
+			if _, ok := argsByIndex[ev.ToolCall.Index]; !ok {
+				indexOrder = append(indexOrder, ev.ToolCall.Index)
+				argsByIndex[ev.ToolCall.Index] = ""
+			}
+		case llm.EventToolCallArgsDelta:
+			if ev.ToolCall == nil {
+				t.Fatalf("event[%d] EventToolCallArgsDelta: ToolCall == nil", i)
+			}
+			if seenIndices[ev.ToolCall.Index] != 1 {
+				t.Errorf("event[%d] EventToolCallArgsDelta: Index %d has no preceding Start (state=%d)", i, ev.ToolCall.Index, seenIndices[ev.ToolCall.Index])
+			}
+			argsByIndex[ev.ToolCall.Index] += ev.ToolCall.ArgsDelta
+		case llm.EventToolCallEnd:
+			if ev.ToolCall == nil {
+				t.Fatalf("event[%d] EventToolCallEnd: ToolCall == nil", i)
+			}
+			if seenIndices[ev.ToolCall.Index] != 1 {
+				t.Errorf("event[%d] EventToolCallEnd: Index %d has no matching Start (state=%d)", i, ev.ToolCall.Index, seenIndices[ev.ToolCall.Index])
+			}
+			seenIndices[ev.ToolCall.Index] = 2
+		case llm.EventDone:
+			if i != len(events)-1 {
+				t.Errorf("event[%d] EventDone: not the last event (followed by %d more)", i, len(events)-1-i)
+			}
+			if ev.Usage == nil {
+				t.Errorf("event[%d] EventDone: Usage == nil (K1 rule: Done populates Usage)", i)
+			}
+			if ev.FinishReason == "" {
+				t.Errorf("event[%d] EventDone: FinishReason == \"\" (K1 rule: Done populates FinishReason)", i)
+			}
+		}
+	}
+
+	// 3. Optional cross-check: expected accumulated tool calls match.
+	if len(f.Expect.ToolCalls) > 0 {
+		if len(f.Expect.ToolCalls) != len(indexOrder) {
+			t.Fatalf("ToolCalls count: got %d (indices=%v), want %d", len(indexOrder), indexOrder, len(f.Expect.ToolCalls))
+		}
+		for i, want := range f.Expect.ToolCalls {
+			idx := indexOrder[i]
+			if nameByIndex[idx] != want.Name {
+				t.Errorf("ToolCalls[%d] (Index %d) Name: got %q want %q", i, idx, nameByIndex[idx], want.Name)
+			}
+			if want.ID != "" && idByIndex[idx] != want.ID {
+				t.Errorf("ToolCalls[%d] (Index %d) ID: got %q want %q", i, idx, idByIndex[idx], want.ID)
+			}
+			if !jsonEqual([]byte(argsByIndex[idx]), []byte(want.Arguments)) {
+				t.Errorf("ToolCalls[%d] (Index %d) Arguments: got %q want %q", i, idx, argsByIndex[idx], want.Arguments)
+			}
+		}
+	}
+}
+
+func kindName(k llm.StreamEventKind) string {
+	switch k {
+	case llm.EventTextDelta:
+		return "text"
+	case llm.EventToolCallStart:
+		return "tool_start"
+	case llm.EventToolCallArgsDelta:
+		return "tool_args"
+	case llm.EventToolCallEnd:
+		return "tool_end"
+	case llm.EventThinkingDelta:
+		return "thinking"
+	case llm.EventDone:
+		return "done"
+	default:
+		return "unknown"
+	}
+}
+
+func isEOFErr(err error) bool {
+	return errors.Is(err, io.EOF)
 }
 
 func AssertToolCalling(t *testing.T, model llm.ChatModel, f Fixture) {

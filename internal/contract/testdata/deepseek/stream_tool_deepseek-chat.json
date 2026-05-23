@@ -1,0 +1,57 @@
+{
+  "scenario": "stream_tool_deepseek-chat",
+  "tools": [
+    {
+      "name": "calc",
+      "description": "calculator",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"expr\":{\"type\":\"string\"}}}"
+    },
+    {
+      "name": "search",
+      "description": "web search",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}}}"
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/chat/completions",
+    "body_assertions": [
+      "\"include_usage\":true",
+      "deepseek-chat",
+      "\"name\":\"calc\"",
+      "\"name\":\"search\""
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "text/event-stream"
+    },
+    "body": "data: {\"id\":\"chatcmpl_tools\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_calc\",\"type\":\"function\",\"function\":{\"name\":\"calc\",\"arguments\":\"{\\\"expr\\\":\"}},{\"index\":1,\"id\":\"call_search\",\"type\":\"function\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\"}}]},\"finish_reason\":\"\"}]}\n\ndata: {\"id\":\"chatcmpl_tools\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"2+2\\\"}\"}},{\"index\":1,\"function\":{\"arguments\":\"\\\"weather\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: {\"id\":\"chatcmpl_tools\",\"object\":\"chat.completion.chunk\",\"created\":1710000000,\"model\":\"deepseek-chat\",\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":5,\"total_tokens\":14}}\n\ndata: [DONE]\n\n"
+  },
+  "expect": {
+    "stream_sequence": [
+      "tool_start",
+      "tool_args",
+      "tool_start",
+      "tool_args",
+      "tool_args",
+      "tool_args",
+      "tool_end",
+      "tool_end",
+      "done"
+    ],
+    "tool_calls": [
+      {
+        "id": "call_calc",
+        "name": "calc",
+        "arguments": "{\"expr\":\"2+2\"}"
+      },
+      {
+        "id": "call_search",
+        "name": "search",
+        "arguments": "{\"q\":\"weather\"}"
+      }
+    ]
+  }
+}
