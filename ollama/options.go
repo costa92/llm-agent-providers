@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/costa92/llm-agent-providers/internal/compat"
 	"github.com/costa92/llm-agent/llm"
 	api "github.com/ollama/ollama/api"
 )
@@ -95,7 +96,7 @@ func New(opts ...Option) (*Ollama, error) {
 	// reference identity, so 429/Retry-After detection on any path remains
 	// observable from wrapErr regardless of which client made the call.
 	if cfg.timeout == 0 && (cfg.httpClient == nil || cfg.httpClient.Timeout == 0) {
-		cfg.timeout = 60 * time.Second
+		cfg.timeout = compat.DefaultTimeout(cfg.timeout)
 	}
 
 	// Resolve the inner RoundTripper (caller-supplied or default) ONCE so

@@ -6,9 +6,10 @@ this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Phase — P1-23 (PRs 1+2 of 3): extract shared SDK error mapping and
+Phase — P1-23 (PRs 1+2+3 of 3): extract shared SDK error mapping and
 default-timeout into `internal/compat/`; migrate `openai/`, `deepseek/`,
-`anthropic/`, and `minimax/`. Plus P1-6 ollama closure (5/5).
+`anthropic/`, `minimax/`, and finally `ollama/` (default-timeout call
+swap only — Path A). Plus P1-6 ollama closure (5/5).
 
 ### Refactored (P1-23 PR 1 of 3)
 
@@ -33,6 +34,19 @@ default-timeout into `internal/compat/`; migrate `openai/`, `deepseek/`,
   Preserves the 529 Overloaded → RateLimitError special case.
 - Default-timeout for anthropic + minimax now via `compat.DefaultTimeout`.
 - No public API change. Per-provider test counts unchanged.
+
+### Refactored (P1-23 PR 3 of 3)
+
+- Ollama default-timeout now flows through `compat.DefaultTimeout`,
+  preserving the http-client-aware guard (the conditional that skips
+  the default when the user supplied a pre-configured http.Client with
+  its own Timeout). Closes the P1-23 sequence at 5/5 providers calling
+  the same default-timeout helper.
+- Ollama `errors.go` stays per-provider (Path A): the atomic-state
+  pattern (statusCapturingTransport + atomic.Pointer[string]) is the
+  outlier and refactoring it would touch the recently-painted P1-6
+  derived-clients-share-transport work for ~38 LoC saved. Deferred
+  to a future P1-23b if/when a 6th OpenAI-compat provider arrives.
 
 ### Changed (behavior — defensive default, P1-6 follow-up)
 
