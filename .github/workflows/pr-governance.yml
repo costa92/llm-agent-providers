@@ -97,12 +97,12 @@ jobs:
           auto_merge_enabled=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest != null')
           if [ "$auto_merge_enabled" = "true" ]; then
             echo "Auto-merge already enabled for owner PR."
-            exit 0
+          else
+            gh pr merge "$PR_NUMBER" \
+              --repo "$REPO" \
+              --auto \
+              --merge
           fi
-          gh pr merge "$PR_NUMBER" \
-            --repo "$REPO" \
-            --auto \
-            --merge
 
           # Poll the PR because GitHub may report auto-merge enabled a little
           # earlier than the merged state becomes visible via the PR API.
