@@ -1,0 +1,42 @@
+{
+  "scenario": "stream_tool_native_llama3.1-8b",
+  "tools": [
+    {
+      "name": "calculator",
+      "description": "calc",
+      "parameters": "{\"type\":\"object\",\"properties\":{\"expr\":{\"type\":\"string\"}}}"
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/chat",
+    "body_assertions": [
+      "\"stream\":true",
+      "llama3.1:8b",
+      "\"name\":\"calculator\""
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/x-ndjson"
+    },
+    "body": "{\"model\":\"llama3.1:8b\",\"created_at\":\"2026-05-10T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"checking \"},\"done\":false}\n{\"model\":\"llama3.1:8b\",\"created_at\":\"2026-05-10T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_calc\",\"function\":{\"index\":0,\"name\":\"calculator\",\"arguments\":{\"expr\":\"2+2\"}}}]},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":12,\"eval_count\":8}\n"
+  },
+  "expect": {
+    "stream_sequence": [
+      "text",
+      "tool_start",
+      "tool_args",
+      "tool_end",
+      "done"
+    ],
+    "tool_calls": [
+      {
+        "id": "call_calc",
+        "name": "calculator",
+        "arguments": "{\"expr\":\"2+2\"}"
+      }
+    ]
+  }
+}

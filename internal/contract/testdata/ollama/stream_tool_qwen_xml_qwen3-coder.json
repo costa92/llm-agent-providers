@@ -1,0 +1,40 @@
+{
+  "scenario": "stream_tool_qwen_xml_qwen3-coder",
+  "tools": [
+    {
+      "name": "calculator",
+      "description": "calc",
+      "parameters": "{\"type\":\"object\"}"
+    }
+  ],
+  "request": {
+    "method": "POST",
+    "path": "/api/chat",
+    "body_assertions": [
+      "\"stream\":true",
+      "qwen3-coder"
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/x-ndjson"
+    },
+    "body": "{\"model\":\"qwen3-coder:latest\",\"created_at\":\"2026-05-11T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"Checking now.\\n<tool_call>\"},\"done\":false}\n{\"model\":\"qwen3-coder:latest\",\"created_at\":\"2026-05-11T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"{\\\"name\\\":\\\"calculator\\\",\\\"arguments\\\":{\\\"expr\\\":\\\"2+2\\\"}}\"},\"done\":false}\n{\"model\":\"qwen3-coder:latest\",\"created_at\":\"2026-05-11T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"</tool_call>\"},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":9,\"eval_count\":6}\n"
+  },
+  "expect": {
+    "stream_sequence": [
+      "text",
+      "tool_start",
+      "tool_args",
+      "tool_end",
+      "done"
+    ],
+    "tool_calls": [
+      {
+        "name": "calculator",
+        "arguments": "{\"expr\":\"2+2\"}"
+      }
+    ]
+  }
+}

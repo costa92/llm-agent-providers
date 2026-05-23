@@ -147,6 +147,75 @@ func TestStream_Conformance(t *testing.T) {
 	}
 }
 
+// TestStreamToolCalls_Conformance is the cross-provider K1 gate. It exercises
+// streaming-with-tool-calls across all five providers (with Ollama's two
+// emission paths — native and qwen-xml content-parsed) and pins per-call
+// Index stability across Start -> ArgsDelta(s) -> End, terminal Done with
+// Usage + FinishReason.
+//
+// Fixture provenance — each fixture's wire bytes are copied verbatim from a
+// validated per-provider streaming-tool-call test:
+//   - openai      stream_tool_gpt-4o-mini                 openai/openai_test.go:333  TestStream_OpenAI_ToolCalls
+//   - anthropic   stream_tool_claude-3-5-haiku            anthropic/anthropic_test.go:196 TestStream_Anthropic_PartialJSONFlushesOnContentBlockStop
+//   - ollama      stream_tool_native_llama3.1-8b          ollama/ollama_test.go:609  TestStream_Ollama_NativeToolCalls
+//   - ollama      stream_tool_qwen_xml_qwen3-coder        ollama/ollama_test.go:670  TestStream_Ollama_QwenXMLContentToolCalls
+//   - deepseek    stream_tool_deepseek-chat               deepseek/deepseek_test.go:359 TestStream_DeepSeek_ToolCalls
+//   - minimax     stream_tool_MiniMax-M1                  minimax/minimax_test.go:220 TestStream_MiniMax_PartialJSONFlushesOnContentBlockStop
+//
+// This gate closes the cross-provider K1 ollama YELLOW classification — the
+// per-provider tests already prove ollama is K1-conformant (commit 32f5d59,
+// 2026-05-20); this test enforces it at the shared conformance layer.
+func TestStreamToolCalls_Conformance(t *testing.T) {
+	// Per-case factory overrides allow scenarios that require a specific
+	// model (e.g. ollama qwen-xml needs qwen3-coder, not llama3.1:8b).
+	cases := []struct {
+		name     string
+		provider string
+		scenario string
+		factory  ChatModelFactory // optional override; nil means use AdapterFactories[provider]
+	}{
+		{name: "openai gpt-4o-mini", provider: "openai", scenario: "stream_tool_gpt-4o-mini"},
+		{name: "anthropic claude-3-5-haiku", provider: "anthropic", scenario: "stream_tool_claude-3-5-haiku"},
+		{
+			name:     "ollama native llama3.1:8b",
+			provider: "ollama",
+			scenario: "stream_tool_native_llama3.1-8b",
+		},
+		{
+			name:     "ollama qwen-xml content qwen3-coder:latest",
+			provider: "ollama",
+			scenario: "stream_tool_qwen_xml_qwen3-coder",
+			factory: func(baseURL string) (llm.ChatModel, error) {
+				return ollama.New(
+					ollama.WithModel("qwen3-coder:latest"),
+					ollama.WithBaseURL(baseURL),
+				)
+			},
+		},
+		{name: "deepseek deepseek-chat", provider: "deepseek", scenario: "stream_tool_deepseek-chat"},
+		{name: "minimax MiniMax-M1", provider: "minimax", scenario: "stream_tool_MiniMax-M1"},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.provider+"/"+c.scenario, func(t *testing.T) {
+			t.Parallel()
+			f := LoadFixture(t, c.provider, c.scenario)
+			srv := NewMockServer(t, f)
+			t.Cleanup(srv.Close)
+			factory := c.factory
+			if factory == nil {
+				factory = AdapterFactories[c.provider]
+			}
+			model, err := factory(srv.URL)
+			if err != nil {
+				t.Fatalf("factory: %v", err)
+			}
+			AssertStreamToolCalls(t, model, f)
+		})
+	}
+}
+
 func TestToolCalling_Conformance(t *testing.T) {
 	cases := []struct {
 		provider string
