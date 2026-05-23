@@ -6,8 +6,24 @@ this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Phase — P1-6 ollama closure (5/5): default 60s HTTP request timeout on
-the ollama provider without breaking long-running streams.
+Phase — P1-23 (PR 1 of 3): extract shared OpenAI-SDK error mapping and
+default-timeout into `internal/compat/`; migrate `openai/` + `deepseek/`.
+Plus P1-6 ollama closure (5/5).
+
+### Refactored (P1-23 PR 1 of 3)
+
+- Extracted shared OpenAI-SDK error mapping into `internal/compat/`:
+  `WrapOpenAIError(provider, err)` is now used by both `openai/` and
+  `deepseek/` (the two providers that piggyback on
+  `github.com/openai/openai-go/v3`). The two `errors.go` files were
+  character-for-character identical except for the 6 occurrences of the
+  provider-name string.
+- Extracted `if timeout == 0 { 60s }` block into
+  `compat.DefaultTimeout(d)`. Used by openai + deepseek;
+  anthropic/minimax/ollama migrate in subsequent PRs.
+- `internal/compat/` is Go-`internal/`-scoped — downstream consumers
+  cannot import it. No public API change. Per-provider test counts
+  unchanged; conformance suite (5/5 providers) stays GREEN.
 
 ### Changed (behavior — defensive default, P1-6 follow-up)
 
