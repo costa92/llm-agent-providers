@@ -9,7 +9,49 @@ this project follows [Semantic Versioning](https://semver.org/).
 Phase — P1-23 (PRs 1+2+3 of 3): extract shared SDK error mapping and
 default-timeout into `internal/compat/`; migrate `openai/`, `deepseek/`,
 `anthropic/`, `minimax/`, and finally `ollama/` (default-timeout call
-swap only — Path A). Plus P1-6 ollama closure (5/5).
+swap only — Path A). Plus P1-6 ollama closure (5/5). Plus K1 keystone
+ollama YELLOW → GREEN via cross-provider conformance gate (2026-05-23).
+
+### Added (K1 keystone — closes ollama YELLOW)
+
+- `internal/contract.AssertStreamToolCalls` — K1 conformance assertion
+  for streaming-with-tool-calls. Pins per-call `Index` stability across
+  `EventToolCallStart` → `EventToolCallArgsDelta`(s) → `EventToolCallEnd`
+  and that `EventDone` is terminal with `Usage` + `FinishReason`
+  populated. New `Fixture.Expect.StreamSequence []string` field encodes
+  the expected `Kind` name sequence (text / tool_start / tool_args /
+  tool_end / thinking / done).
+- `TestStreamToolCalls_Conformance` — cross-provider K1 gate exercising
+  5/5 providers (6 cases: openai / anthropic / ollama-native /
+  ollama-qwen-xml / deepseek / minimax). Fixtures derived verbatim from
+  validated per-provider streaming-tool-call test wire shapes
+  (`openai/openai_test.go:333`, `anthropic/anthropic_test.go:196`,
+  `ollama/ollama_test.go:609`, `ollama/ollama_test.go:670`,
+  `deepseek/deepseek_test.go:359`, `minimax/minimax_test.go:220`).
+- ollama K1 keystone flipped from YELLOW to GREEN. The classification
+  was stale — ollama emission code at `ollama/ollama.go:211-327` has
+  been K1-conformant since commit `32f5d59` (2026-05-20), emitting the
+  full `EventToolCallStart/ArgsDelta/End` triple for both native
+  `tool_calls`-field and content-parsed `<tool_call>...</tool_call>`
+  paths with stable per-call `Index`. Three planning docs that still
+  claimed YELLOW predate that commit and are now refreshed
+  (`.planning/codebase/CONCERNS.md`, `.planning/codebase/ARCHITECTURE.md`,
+  `.planning/codebase/TESTING.md`); the umbrella
+  `docs/ecosystem-design-review.zh-CN.md` is updated in a paired
+  umbrella-repo commit. Keystone scorecard now reads **12 GREEN / 0
+  YELLOW / 0 RED**.
+- Zero production code changes in this PR. Pure test + doc work.
+
+### Deferred (Phase 2 / v0.6.0 follow-up)
+
+- `llm-agent/llm/stream.go::appendToolCallDelta` keys by `ID`; should
+  key by `Index`. The function comment already notes "NOT the
+  production accumulator". Touches the frozen core, requires a minor
+  bump, and was out of scope for this YELLOW-lift PR.
+- Real-capture fixtures from live providers — current `stream_tool_*`
+  fixtures are hand-crafted from validated per-provider test wire
+  shapes (same validity, faster to ship). If `nightly-ollama-live.yml`
+  observes a wire-shape drift, refresh from real capture.
 
 ### Refactored (P1-23 PR 1 of 3)
 
