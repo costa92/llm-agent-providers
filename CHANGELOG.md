@@ -6,9 +6,9 @@ this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Phase — P1-23 (PR 1 of 3): extract shared OpenAI-SDK error mapping and
-default-timeout into `internal/compat/`; migrate `openai/` + `deepseek/`.
-Plus P1-6 ollama closure (5/5).
+Phase — P1-23 (PRs 1+2 of 3): extract shared SDK error mapping and
+default-timeout into `internal/compat/`; migrate `openai/`, `deepseek/`,
+`anthropic/`, and `minimax/`. Plus P1-6 ollama closure (5/5).
 
 ### Refactored (P1-23 PR 1 of 3)
 
@@ -24,6 +24,15 @@ Plus P1-6 ollama closure (5/5).
 - `internal/compat/` is Go-`internal/`-scoped — downstream consumers
   cannot import it. No public API change. Per-provider test counts
   unchanged; conformance suite (5/5 providers) stays GREEN.
+
+### Refactored (P1-23 PR 2 of 3)
+
+- Extracted shared Anthropic-SDK error mapping into `internal/compat/`:
+  `WrapAnthropicError(provider, err)` is now used by both `anthropic/` and
+  `minimax/` (the two providers that piggyback on `github.com/anthropics/anthropic-sdk-go`).
+  Preserves the 529 Overloaded → RateLimitError special case.
+- Default-timeout for anthropic + minimax now via `compat.DefaultTimeout`.
+- No public API change. Per-provider test counts unchanged.
 
 ### Changed (behavior — defensive default, P1-6 follow-up)
 
