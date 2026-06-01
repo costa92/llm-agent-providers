@@ -44,9 +44,6 @@ jobs:
               return;
             }
 
-            // The default-branch push is the first event that can reliably
-            // observe the just-merged PR from a workflow file already present
-            // on the default branch.
             const pr = pulls.find((item) => item.merged_at) ?? pulls[0];
             const sameRepo = pr.head.repo && pr.head.repo.full_name === context.payload.repository.full_name;
 
