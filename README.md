@@ -7,7 +7,7 @@ interfaces from `llm-agent/llm` (`ChatModel`, `ToolCaller`, `Embedder`,
 `StructuredOutputs`).
 
 This repo ships the full provider surface verified against the
-`llm-agent v0.5.1` core (the v1.1 ecosystem-alignment back-edge):
+current `llm-agent` core contract:
 
 - OpenAI: Generate, Stream, Tool calling, Embeddings
 - Anthropic: Generate, Stream, Tool calling, explicit `ErrNotSupported` for
@@ -21,11 +21,11 @@ This repo ships the full provider surface verified against the
 ## Install
 
 ```bash
-go get github.com/costa92/llm-agent-providers/openai@v0.1.0
-go get github.com/costa92/llm-agent-providers/anthropic@v0.1.0
-go get github.com/costa92/llm-agent-providers/ollama@v0.1.0
-go get github.com/costa92/llm-agent-providers/deepseek@v0.1.0
-go get github.com/costa92/llm-agent-providers/minimax@v0.1.0
+go get github.com/costa92/llm-agent-providers/openai@latest
+go get github.com/costa92/llm-agent-providers/anthropic@latest
+go get github.com/costa92/llm-agent-providers/ollama@latest
+go get github.com/costa92/llm-agent-providers/deepseek@latest
+go get github.com/costa92/llm-agent-providers/minimax@latest
 ```
 
 ## Shipped provider surface
@@ -78,9 +78,9 @@ go get github.com/costa92/llm-agent-providers/minimax@v0.1.0
 
 ## Cross-repo iteration pattern (INFRA-06)
 
-This repo lives in a 4-repo umbrella alongside [`llm-agent`](https://github.com/costa92/llm-agent), [`llm-agent-otel`](https://github.com/costa92/llm-agent-otel), and [`llm-agent-customer-support`](https://github.com/costa92/llm-agent-customer-support). For local development across repos:
+This repo is part of the broader `llm-agent-ecosystem`. The local helper script in this repo targets a common 4-repo development subset alongside [`llm-agent`](https://github.com/costa92/llm-agent), [`llm-agent-otel`](https://github.com/costa92/llm-agent-otel), and [`llm-agent-customer-support`](https://github.com/costa92/llm-agent-customer-support). For local development across that subset:
 
-**Recommended:** clone all 4 repos as siblings, run `./scripts/workspace.sh` from any of them, then develop with a `go.work` file. The workspace file is `.gitignore`d in every repo:
+**Recommended for this subset:** clone all 4 repos as siblings, run `./scripts/workspace.sh` from any of them, then develop with a `go.work` file. The workspace file is `.gitignore`d in every repo:
 
 ```bash
 cd <parent>
@@ -103,9 +103,8 @@ The `release-precheck` CI workflow rejects any non-empty `replace` block on bran
 
 ## Versioning
 
-This repo tracks the `llm-agent` core surface. As of v0.2.0 it pins
-`github.com/costa92/llm-agent v0.5.1` (the v1.1 ecosystem-alignment
-cascade back-edge). Cross-repo bump waves follow the umbrella's
+This repo tracks the `llm-agent` core surface. Check `go.mod` for the
+current exact sibling pins; cross-repo bump waves follow the umbrella's
 "coordinated bump + re-tag" pattern (umbrella Phase 33).
 
 ## PR automation
