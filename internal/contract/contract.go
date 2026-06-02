@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/costa92/llm-agent/llm"
+	"github.com/costa92/llm-agent-contract/llm"
 )
 
 type Fixture struct {
