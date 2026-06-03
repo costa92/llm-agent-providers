@@ -6,7 +6,7 @@ import (
 	"net"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
-	"github.com/costa92/llm-agent/llm"
+	"github.com/costa92/llm-agent-contract/llm"
 )
 
 // WrapAnthropicError maps an error returned by a github.com/anthropics/anthropic-sdk-go

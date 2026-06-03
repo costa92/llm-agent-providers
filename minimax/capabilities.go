@@ -1,6 +1,6 @@
 package minimax
 
-import "github.com/costa92/llm-agent/llm"
+import "github.com/costa92/llm-agent-contract/llm"
 
 // capabilitiesForModel returns the static capability set for a MiniMax model.
 // Per ecosystem K2 (capabilities are per provider×model), New() must consult

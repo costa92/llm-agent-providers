@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
-	"github.com/costa92/llm-agent/llm"
+	"github.com/costa92/llm-agent-contract/llm"
 )
 
 // newAnthropicAPIErr constructs a *sdk.Error (alias for apierror.Error)

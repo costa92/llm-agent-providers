@@ -16,7 +16,7 @@ import (
 	"github.com/costa92/llm-agent-providers/minimax"
 	"github.com/costa92/llm-agent-providers/ollama"
 	"github.com/costa92/llm-agent-providers/openai"
-	"github.com/costa92/llm-agent/llm"
+	"github.com/costa92/llm-agent-contract/llm"
 )
 
 var AdapterFactories = map[string]ChatModelFactory{

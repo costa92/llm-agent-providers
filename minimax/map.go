@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
-	"github.com/costa92/llm-agent/llm"
+	"github.com/costa92/llm-agent-contract/llm"
 )
 
 func (m *MiniMax) toSDKRequest(req llm.Request) sdk.MessageNewParams {
