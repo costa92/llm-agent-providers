@@ -129,7 +129,7 @@ func parseQwenToolCalls(content string) ([]llm.ToolCall, string, error) {
 		return calls, strings.TrimSpace(stripped.String()), nil
 	}
 
-	trimmed := strings.TrimSpace(content)
+	trimmed := stripCodeFence(strings.TrimSpace(content))
 	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
 		return nil, content, nil
 	}
@@ -138,6 +138,28 @@ func parseQwenToolCalls(content string) ([]llm.ToolCall, string, error) {
 		return nil, content, nil
 	}
 	return []llm.ToolCall{call}, "", nil
+}
+
+// stripCodeFence unwraps a single leading Markdown code fence that some models
+// (observed: qwen2.5-coder via Ollama) wrap a tool-call JSON object in —
+// ```json\n{...}\n```. Without unwrapping, the bare-JSON fallback above misses
+// it because the content starts with "```" rather than "{". Returns s
+// unchanged when there is no leading fence.
+func stripCodeFence(s string) string {
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	// Drop the opening fence line (``` optionally followed by a language tag).
+	nl := strings.IndexByte(s, '\n')
+	if nl < 0 {
+		return s
+	}
+	s = s[nl+1:]
+	// Drop the trailing closing fence, if present.
+	if i := strings.LastIndex(s, "```"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
 
 func decodeFallbackToolCall(raw string) (llm.ToolCall, error) {

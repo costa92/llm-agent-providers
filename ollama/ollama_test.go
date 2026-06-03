@@ -398,6 +398,45 @@ func TestWithTools_Ollama_Qwen25BareJSONFallback(t *testing.T) {
 	}
 }
 
+func TestWithTools_Ollama_Qwen25MarkdownFencedJSON(t *testing.T) {
+	// qwen2.5-coder via Ollama emits the tool call as a ```json fenced block
+	// rather than bare JSON or <tool_call> tags — the parser must unwrap it.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"qwen2.5-coder:3b","created_at":"2026-06-03T00:00:00Z","message":{"role":"assistant","content":"` + "```json\\n{\\n  \\\"name\\\": \\\"calculator\\\",\\n  \\\"arguments\\\": {\\n    \\\"expr\\\": \\\"2+2\\\"\\n  }\\n}\\n```" + `"},"done":true,"done_reason":"stop","prompt_eval_count":11,"eval_count":5}` + "\n"))
+	}))
+	defer server.Close()
+
+	base, err := New(WithModel("qwen2.5-coder:3b"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	m, err := base.WithTools([]llm.Tool{{Name: "calculator", Description: "calc tool", Parameters: []byte(`{"type":"object"}`)}})
+	if err != nil {
+		t.Fatalf("WithTools(): %v", err)
+	}
+
+	resp, err := m.Generate(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "2+2"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if resp.Text != "" {
+		t.Fatalf("Text = %q, want empty after fenced-json tool extraction", resp.Text)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "calculator" {
+		t.Fatalf("ToolCalls = %+v, want fenced json parsed tool call", resp.ToolCalls)
+	}
+	var args map[string]string
+	if err := json.Unmarshal(resp.ToolCalls[0].Arguments, &args); err != nil {
+		t.Fatalf("unmarshal arguments: %v", err)
+	}
+	if args["expr"] != "2+2" {
+		t.Fatalf("arguments = %+v, want expr=2+2", args)
+	}
+}
+
 func TestGenerate_Ollama_404ModelNotPulled(t *testing.T) {
 	assertOllamaTypedError(t, 404, `{"error":"model not found, try pulling it first"}`, func(err error) bool {
 		var target *llm.InvalidRequestError
