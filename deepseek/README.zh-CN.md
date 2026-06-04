@@ -2,26 +2,26 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-DeepSeek adapter for `github.com/costa92/llm-agent/llm`.
+面向 `github.com/costa92/llm-agent/llm` 的 DeepSeek 适配器。
 
-Current scope:
+当前范围：
 
 - `llm.ChatModel.Generate`
 - `llm.ChatModel.Stream`
 - `llm.ToolCaller.WithTools`
-- `Info()` with model-bound provider metadata
+- 带模型绑定提供方元数据的 `Info()`
 
-Deliberate capability gap:
+有意保留的能力缺口：
 
-- embeddings are not implemented
-- `Info().Capabilities.Embeddings` is always `false`
+- 未实现嵌入（embeddings）
+- `Info().Capabilities.Embeddings` 始终为 `false`
 
-Regional routing:
+区域路由：
 
-- `WithRegion(RegionCN|RegionGlobal)` selects a preset endpoint
-- `WithBaseURL(...)` overrides region presets
+- `WithRegion(RegionCN|RegionGlobal)` 选择预设端点
+- `WithBaseURL(...)` 覆盖区域预设
 
-Minimal example:
+最小示例：
 
 ```go
 model, err := deepseek.New(

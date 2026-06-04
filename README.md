@@ -1,5 +1,7 @@
 # llm-agent-providers
 
+[English](./README.md) | [简体中文](./README.zh-CN.md)
+
 Provider adapters for
 [`github.com/costa92/llm-agent`](https://github.com/costa92/llm-agent) —
 OpenAI, Anthropic, Ollama, DeepSeek, and MiniMax. Each adapter implements the capability
