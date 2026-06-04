@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/costa92/llm-agent-contract/llm"
+	"go.uber.org/goleak"
 )
 
 func TestGenerate_Volcengine_Happy(t *testing.T) {
@@ -489,5 +490,83 @@ func TestEmbed_Volcengine_CapabilityGate(t *testing.T) {
 	}
 	if got := m.EmbedDimensions(); got != 0 {
 		t.Fatalf("EmbedDimensions() = %d, want 0 for non-embed model", got)
+	}
+}
+
+func TestExtraHeaders_Volcengine_Forwarded(t *testing.T) {
+	var seenHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHeader = r.Header.Get("X-Gateway-Route")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","model":"doubao-1-5-pro-32k-250115","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	m, err := New(
+		WithModel("doubao-1-5-pro-32k-250115"),
+		WithAPIKey("k"),
+		WithBaseURL(server.URL),
+		WithExtraHeaders(map[string]string{"X-Gateway-Route": "canary"}),
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, err = m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if seenHeader != "canary" {
+		t.Fatalf("X-Gateway-Route = %q, want canary", seenHeader)
+	}
+}
+
+func TestInfo_Volcengine_CapabilityMatrix(t *testing.T) {
+	cases := []struct {
+		model     string
+		wantTools bool
+		wantImage bool
+		wantEmbed bool
+	}{
+		{"doubao-1-5-pro-32k-250115", true, false, false},
+		{"doubao-seedream-4-5-251128", false, true, false},
+		{"doubao-embedding-text-240715", false, false, true},
+	}
+	for _, c := range cases {
+		m, err := New(WithModel(c.model), WithAPIKey("k"))
+		if err != nil {
+			t.Fatalf("New(%q): %v", c.model, err)
+		}
+		caps := m.Info().Capabilities
+		if caps.Tools != c.wantTools || caps.ImageGeneration != c.wantImage || caps.Embeddings != c.wantEmbed {
+			t.Fatalf("Info(%q).Capabilities = %+v, want tools=%v image=%v embed=%v",
+				c.model, caps, c.wantTools, c.wantImage, c.wantEmbed)
+		}
+		if m.Info().Provider != "volcengine" {
+			t.Fatalf("Provider = %q, want volcengine", m.Info().Provider)
+		}
+	}
+}
+
+func TestStream_Volcengine_NoGoroutineLeak(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"c1\",\"model\":\"doubao-1-5-pro-32k-250115\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"c1\",\"model\":\"doubao-1-5-pro-32k-250115\",\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("doubao-1-5-pro-32k-250115"), WithAPIKey("k"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	sr, err := m.Stream(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	if _, err := llm.AccumulateStream(sr); err != nil {
+		t.Fatalf("AccumulateStream(): %v", err)
 	}
 }
