@@ -302,3 +302,106 @@ func asTransient(err error, e **llm.TransientError) bool    { return errorsAs(er
 func asInvalid(err error, e **llm.InvalidRequestError) bool { return errorsAs(err, e) }
 func errorsAs(err error, target any) bool                   { return errors.As(err, target) }
 func isContextCanceled(err error) bool                      { return errors.Is(err, context.Canceled) }
+
+func TestGenerateImage_Volcengine_URL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/images/generations" {
+			t.Fatalf("Path = %s, want /images/generations", r.URL.Path)
+		}
+		bodyBytes, _ := io.ReadAll(r.Body)
+		body := string(bodyBytes)
+		if !strings.Contains(body, `"model":"doubao-seedream-4-5-251128"`) {
+			t.Fatalf("body missing model: %s", body)
+		}
+		if !strings.Contains(body, `"prompt":"a red panda"`) {
+			t.Fatalf("body missing prompt: %s", body)
+		}
+		if !strings.Contains(body, `"size":"1024x1024"`) {
+			t.Fatalf("body missing size: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"doubao-seedream-4-5-251128",
+			"created":1710000000,
+			"data":[{"url":"https://example.com/img.png","size":"1024x1024"}],
+			"usage":{"generated_images":1,"output_tokens":0,"total_tokens":0}
+		}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("doubao-seedream-4-5-251128"), WithAPIKey("k"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	resp, err := m.GenerateImage(context.Background(), llm.ImageRequest{
+		Prompt: "a red panda",
+		Size:   "1024x1024",
+	})
+	if err != nil {
+		t.Fatalf("GenerateImage(): %v", err)
+	}
+	if resp.Provider != "volcengine" || resp.Model != "doubao-seedream-4-5-251128" {
+		t.Fatalf("resp meta = %+v, want volcengine/doubao-seedream-4-5-251128", resp)
+	}
+	if len(resp.Images) != 1 {
+		t.Fatalf("len(Images) = %d, want 1", len(resp.Images))
+	}
+	if resp.Images[0].URL != "https://example.com/img.png" {
+		t.Fatalf("Images[0].URL = %q, want https://example.com/img.png", resp.Images[0].URL)
+	}
+	if len(resp.Images[0].Bytes) != 0 {
+		t.Fatalf("Images[0].Bytes = %d bytes, want 0 (URL delivery)", len(resp.Images[0].Bytes))
+	}
+}
+
+func TestGenerateImage_Volcengine_Base64(t *testing.T) {
+	// base64 of the 3 bytes {0x01,0x02,0x03} is "AQID"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(bodyBytes), `"response_format":"b64_json"`) {
+			t.Fatalf("body missing b64_json response_format: %s", string(bodyBytes))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"doubao-seedream-4-5-251128",
+			"created":1710000000,
+			"data":[{"b64_json":"AQID","size":"1024x1024"}]
+		}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("doubao-seedream-4-5-251128"), WithAPIKey("k"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	resp, err := m.GenerateImage(context.Background(), llm.ImageRequest{
+		Prompt: "a red panda",
+		Format: "b64_json",
+	})
+	if err != nil {
+		t.Fatalf("GenerateImage(): %v", err)
+	}
+	if len(resp.Images) != 1 {
+		t.Fatalf("len(Images) = %d, want 1", len(resp.Images))
+	}
+	if resp.Images[0].URL != "" {
+		t.Fatalf("Images[0].URL = %q, want empty (bytes delivery)", resp.Images[0].URL)
+	}
+	if string(resp.Images[0].Bytes) != "\x01\x02\x03" {
+		t.Fatalf("Images[0].Bytes = %v, want [1 2 3]", resp.Images[0].Bytes)
+	}
+}
+
+func TestGenerateImage_Volcengine_CapabilityGate(t *testing.T) {
+	m, err := New(WithModel("doubao-1-5-pro-32k-250115"), WithAPIKey("k"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, gerr := m.GenerateImage(context.Background(), llm.ImageRequest{Prompt: "x"})
+	if gerr == nil {
+		t.Fatal("GenerateImage() error = nil, want ErrCapabilityNotSupported")
+	}
+	if !errors.Is(gerr, llm.ErrCapabilityNotSupported) {
+		t.Fatalf("GenerateImage() error = %v, want ErrCapabilityNotSupported", gerr)
+	}
+}
