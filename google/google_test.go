@@ -1,9 +1,138 @@
 package google
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/costa92/llm-agent-contract/llm"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	// go.opencensus.io (a transitive dependency of the genai SDK) starts a
+	// global stats-view worker goroutine in its package init that runs for
+	// the lifetime of the process and cannot be stopped. It is not leaked by
+	// the provider, so ignore it.
+	goleak.VerifyTestMain(m,
+		goleak.IgnoreTopFunction("go.opencensus.io/stats/view.(*worker).start"),
+	)
+}
+
+// newTestServer builds an httptest server and a Google bound to model on it.
+func newTestServer(t *testing.T, model string, handler http.HandlerFunc) *Google {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	g, err := New(WithModel(model), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	return g
+}
+
+func TestGenerate_Happy(t *testing.T) {
+	g := newTestServer(t, "gemini-2.5-flash", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, ":generateContent") {
+			t.Errorf("path = %s, want suffix :generateContent", r.URL.Path)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "test-key" {
+			t.Errorf("x-goog-api-key = %q, want test-key", got)
+		}
+		body, _ := io.ReadAll(r.Body)
+		s := string(body)
+		if !strings.Contains(s, `"systemInstruction"`) {
+			t.Errorf("body missing systemInstruction: %s", s)
+		}
+		if !strings.Contains(s, `"role":"user"`) {
+			t.Errorf("body missing user role: %s", s)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"candidates":[{"content":{"role":"model","parts":[{"text":"Hello there"}]},"finishReason":"STOP","index":0}],
+			"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2,"totalTokenCount":6},
+			"modelVersion":"gemini-2.5-flash"
+		}`))
+	})
+
+	resp, err := g.Generate(context.Background(), llm.Request{
+		SystemPrompt: "Be brief.",
+		Messages:     []llm.Message{{Role: "user", Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Text != "Hello there" {
+		t.Errorf("Text = %q, want Hello there", resp.Text)
+	}
+	if resp.FinishReason != llm.FinishReasonStop {
+		t.Errorf("FinishReason = %q, want stop", resp.FinishReason)
+	}
+	if resp.Provider != "google" {
+		t.Errorf("Provider = %q, want google", resp.Provider)
+	}
+	if resp.Usage.InputTokens != 4 || resp.Usage.OutputTokens != 2 || resp.Usage.TotalTokens != 6 {
+		t.Errorf("Usage = %+v, want 4/2/6", resp.Usage)
+	}
+	if resp.Usage.Source != llm.UsageReported {
+		t.Errorf("Usage.Source = %q, want reported", resp.Usage.Source)
+	}
+}
+
+func TestGenerate_ToolCall(t *testing.T) {
+	g := newTestServer(t, "gemini-2.5-flash", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		s := string(body)
+		// tool schema forwarded via parametersJsonSchema
+		if !strings.Contains(s, `"functionDeclarations"`) {
+			t.Errorf("body missing functionDeclarations: %s", s)
+		}
+		if !strings.Contains(s, `"parametersJsonSchema"`) {
+			t.Errorf("body missing parametersJsonSchema: %s", s)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"candidates":[{"content":{"role":"model","parts":[
+				{"functionCall":{"id":"call_1","name":"get_weather","args":{"city":"Paris"}}}
+			]},"finishReason":"STOP","index":0}],
+			"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}
+		}`))
+	})
+
+	tc, err := g.WithTools([]llm.Tool{{
+		Name:        "get_weather",
+		Description: "Get weather for a city",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`),
+	}})
+	if err != nil {
+		t.Fatalf("WithTools: %v", err)
+	}
+	resp, err := tc.Generate(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "Weather in Paris?"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("ToolCalls len = %d, want 1", len(resp.ToolCalls))
+	}
+	call := resp.ToolCalls[0]
+	if call.ID != "call_1" || call.Name != "get_weather" {
+		t.Errorf("ToolCall id/name = %s/%s, want call_1/get_weather", call.ID, call.Name)
+	}
+	var args map[string]any
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		t.Fatalf("Arguments not valid JSON: %v (%s)", err, call.Arguments)
+	}
+	if args["city"] != "Paris" {
+		t.Errorf("args.city = %v, want Paris", args["city"])
+	}
+}
 
 func TestNew_RequiresModel(t *testing.T) {
 	_, err := New()
@@ -99,5 +228,149 @@ func TestEmbedDimensions_NonEmbedModel(t *testing.T) {
 	}
 	if got := g.EmbedDimensions(); got != 0 {
 		t.Errorf("EmbedDimensions() = %d, want 0 for non-embed model", got)
+	}
+}
+
+// readAll drains a StreamReader into ordered events (excluding the io.EOF).
+func readAll(t *testing.T, sr llm.StreamReader) []llm.StreamEvent {
+	t.Helper()
+	defer sr.Close()
+	var events []llm.StreamEvent
+	for {
+		ev, err := sr.Next()
+		if errors.Is(err, io.EOF) {
+			return events
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		events = append(events, ev)
+	}
+}
+
+func TestStream_TextDeltas(t *testing.T) {
+	g := newTestServer(t, "gemini-2.5-flash", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, ":streamGenerateContent") {
+			t.Errorf("path = %s, want suffix :streamGenerateContent", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		chunks := []string{
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":"Hel"}]},"index":0}]}`,
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":"lo"}]},"index":0}]}`,
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":""}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1,"totalTokenCount":4}}`,
+		}
+		for _, c := range chunks {
+			_, _ = io.WriteString(w, "data: "+c+"\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	})
+
+	sr, err := g.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	events := readAll(t, sr)
+
+	var text string
+	var sawDone bool
+	for _, ev := range events {
+		switch ev.Kind {
+		case llm.EventTextDelta:
+			text += ev.Text
+		case llm.EventDone:
+			sawDone = true
+			if ev.FinishReason != llm.FinishReasonStop {
+				t.Errorf("Done.FinishReason = %q, want stop", ev.FinishReason)
+			}
+			if ev.Usage == nil || ev.Usage.TotalTokens != 4 {
+				t.Errorf("Done.Usage = %+v, want total=4", ev.Usage)
+			}
+		}
+	}
+	if text != "Hello" {
+		t.Errorf("text = %q, want Hello", text)
+	}
+	if !sawDone {
+		t.Error("no EventDone emitted")
+	}
+}
+
+func TestStream_ToolCallCompleteInOneChunk(t *testing.T) {
+	g0 := newTestServer(t, "gemini-2.5-flash", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		chunk := `{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_9","name":"lookup","args":{"q":"x"}}}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`
+		_, _ = io.WriteString(w, "data: "+chunk+"\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	})
+	g, err := g0.WithTools([]llm.Tool{{Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`)}})
+	if err != nil {
+		t.Fatalf("WithTools: %v", err)
+	}
+
+	sr, err := g.Stream(context.Background(), llm.Request{
+		Messages: []llm.Message{{Role: "user", Content: "go"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	events := readAll(t, sr)
+
+	var sawStart, sawArgs, sawEnd bool
+	var argsJSON string
+	for _, ev := range events {
+		switch ev.Kind {
+		case llm.EventToolCallStart:
+			sawStart = true
+			if ev.ToolCall == nil || ev.ToolCall.Name != "lookup" || ev.ToolCall.ID != "call_9" {
+				t.Errorf("Start ToolCall = %+v, want name=lookup id=call_9", ev.ToolCall)
+			}
+		case llm.EventToolCallArgsDelta:
+			sawArgs = true
+			if ev.ToolCall != nil {
+				argsJSON = ev.ToolCall.ArgsDelta
+			}
+		case llm.EventToolCallEnd:
+			sawEnd = true
+		}
+	}
+	if !sawStart || !sawArgs || !sawEnd {
+		t.Fatalf("tool events start=%v args=%v end=%v, want all true", sawStart, sawArgs, sawEnd)
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		t.Fatalf("ArgsDelta not valid JSON: %v (%s)", err, argsJSON)
+	}
+	if args["q"] != "x" {
+		t.Errorf("args.q = %v, want x", args["q"])
+	}
+}
+
+// Accumulate parity: the stream reduces to the same tool call via the
+// contract's AccumulateStream helper.
+func TestStream_AccumulateParity(t *testing.T) {
+	g0 := newTestServer(t, "gemini-2.5-flash", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunk := `{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"c","name":"f","args":{"a":1}}}]},"finishReason":"STOP","index":0}],"usageMetadata":{"totalTokenCount":7}}`
+		_, _ = io.WriteString(w, "data: "+chunk+"\n\n")
+	})
+	g, _ := g0.WithTools([]llm.Tool{{Name: "f", Parameters: json.RawMessage(`{"type":"object"}`)}})
+	sr, err := g.Stream(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "x"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	resp, err := llm.AccumulateStream(sr)
+	if err != nil {
+		t.Fatalf("AccumulateStream: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "f" {
+		t.Fatalf("accumulated ToolCalls = %+v, want one named f", resp.ToolCalls)
 	}
 }

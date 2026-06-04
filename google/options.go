@@ -85,9 +85,6 @@ func New(opts ...Option) (*Google, error) {
 	if cfg.baseURL != "" {
 		clientCfg.HTTPOptions.BaseURL = cfg.baseURL
 	}
-	if cfg.timeout > 0 {
-		clientCfg.HTTPOptions.Timeout = &cfg.timeout
-	}
 	if len(cfg.extraHeaders) > 0 {
 		h := http.Header{}
 		for k, v := range cfg.extraHeaders {
@@ -105,6 +102,7 @@ func New(opts ...Option) (*Google, error) {
 		client:     client,
 		taskType:   cfg.taskType,
 		dimensions: cfg.dimensions,
+		timeout:    cfg.timeout,
 		info: llm.ProviderInfo{
 			Provider:     "google",
 			Model:        cfg.model,
