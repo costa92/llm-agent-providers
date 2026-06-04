@@ -2,6 +2,7 @@ package volcengine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -237,3 +238,67 @@ func TestStream_Volcengine_FragmentedToolCalls(t *testing.T) {
 		t.Fatalf("FinishReason = %q, want tool_calls", resp.FinishReason)
 	}
 }
+
+func TestWrapErr_Volcengine_StatusMapping(t *testing.T) {
+	cases := []struct {
+		status int
+		match  func(error) bool
+		name   string
+	}{
+		{401, func(err error) bool { var e *llm.AuthError; return asAuth(err, &e) }, "auth-401"},
+		{403, func(err error) bool { var e *llm.AuthError; return asAuth(err, &e) }, "auth-403"},
+		{429, func(err error) bool { var e *llm.RateLimitError; return asRate(err, &e) }, "rate-429"},
+		{500, func(err error) bool { var e *llm.TransientError; return asTransient(err, &e) }, "transient-500"},
+		{503, func(err error) bool { var e *llm.TransientError; return asTransient(err, &e) }, "transient-503"},
+		{404, func(err error) bool { var e *llm.InvalidRequestError; return asInvalid(err, &e) }, "invalid-404"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(c.status)
+				_, _ = w.Write([]byte(`{"error":{"message":"boom","type":"error","code":"x"}}`))
+			}))
+			defer server.Close()
+
+			m, err := New(WithModel("doubao-1-5-pro-32k-250115"), WithAPIKey("k"), WithBaseURL(server.URL))
+			if err != nil {
+				t.Fatalf("New(): %v", err)
+			}
+			_, gerr := m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+			if gerr == nil {
+				t.Fatalf("Generate() error = nil, want %s", c.name)
+			}
+			if !c.match(gerr) {
+				t.Fatalf("Generate() error = %v (%T), want %s", gerr, gerr, c.name)
+			}
+		})
+	}
+}
+
+func TestWrapErr_Volcengine_ContextCanceled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("doubao-1-5-pro-32k-250115"), WithAPIKey("k"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, gerr := m.Generate(ctx, llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if gerr == nil {
+		t.Fatal("Generate() error = nil, want context.Canceled")
+	}
+	if !isContextCanceled(gerr) {
+		t.Fatalf("Generate() error = %v, want context.Canceled passthrough", gerr)
+	}
+}
+
+func asAuth(err error, e **llm.AuthError) bool              { return errorsAs(err, e) }
+func asRate(err error, e **llm.RateLimitError) bool         { return errorsAs(err, e) }
+func asTransient(err error, e **llm.TransientError) bool    { return errorsAs(err, e) }
+func asInvalid(err error, e **llm.InvalidRequestError) bool { return errorsAs(err, e) }
+func errorsAs(err error, target any) bool                   { return errors.As(err, target) }
+func isContextCanceled(err error) bool                      { return errors.Is(err, context.Canceled) }

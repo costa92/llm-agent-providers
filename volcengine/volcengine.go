@@ -77,9 +77,6 @@ func (v *Volcengine) Generate(ctx context.Context, req llm.Request) (llm.Respons
 	return v.fromSDKResponse(resp), nil
 }
 
-// wrapErr is defined here temporarily; Task 6 moves it to errors.go.
-func wrapErr(err error) error { return err }
-
 // Stream runs a streaming chat completion, returning a typed K1 reader.
 func (v *Volcengine) Stream(ctx context.Context, req llm.Request) (llm.StreamReader, error) {
 	sdkReq := v.toSDKStreamRequest(req)
