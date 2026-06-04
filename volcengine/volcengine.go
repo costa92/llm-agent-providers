@@ -67,10 +67,18 @@ func (v *Volcengine) WithTools(tools []llm.Tool) (llm.ToolCaller, error) {
 	return &cp, nil
 }
 
-// Generate is implemented in this file (Task 4).
+// Generate runs a one-shot chat completion.
 func (v *Volcengine) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
-	return llm.Response{}, io.EOF // placeholder replaced in Task 4
+	sdkReq := v.toSDKRequest(req)
+	resp, err := v.client.CreateChatCompletion(ctx, sdkReq, v.requestOptions()...)
+	if err != nil {
+		return llm.Response{}, wrapErr(err)
+	}
+	return v.fromSDKResponse(resp), nil
 }
+
+// wrapErr is defined here temporarily; Task 6 moves it to errors.go.
+func wrapErr(err error) error { return err }
 
 // Stream is implemented in this file (Task 5).
 func (v *Volcengine) Stream(ctx context.Context, req llm.Request) (llm.StreamReader, error) {
