@@ -17,6 +17,7 @@ current `llm-agent` core contract:
 - Ollama: Generate, Stream, model-aware Tool calling, Embeddings
 - DeepSeek: Generate, Stream, Tool calling
 - MiniMax: Generate, Stream, Tool calling
+- Kimi: Generate, Stream, Tool calling
 - shared `internal/contract` conformance coverage in-repo
 - nightly Ollama live CI coverage
 
@@ -28,6 +29,7 @@ go get github.com/costa92/llm-agent-providers/anthropic@latest
 go get github.com/costa92/llm-agent-providers/ollama@latest
 go get github.com/costa92/llm-agent-providers/deepseek@latest
 go get github.com/costa92/llm-agent-providers/minimax@latest
+go get github.com/costa92/llm-agent-providers/kimi@latest
 ```
 
 ## Shipped provider surface
@@ -71,6 +73,14 @@ go get github.com/costa92/llm-agent-providers/minimax@latest
 - streaming
 - native tool use
 - regional endpoint presets via `WithRegion(...)`
+
+### Kimi
+
+- `kimi.New(...)` bound-model adapter
+- sync generate
+- streaming with usage capture
+- native function/tool calling
+- OpenAI-compatible chat + tools; no image generation or embeddings
 
 ### Conformance
 
