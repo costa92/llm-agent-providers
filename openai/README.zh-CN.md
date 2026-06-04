@@ -2,22 +2,22 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-Phase 1 OpenAI adapter for `github.com/costa92/llm-agent/llm`.
+面向 `github.com/costa92/llm-agent/llm` 的 Phase 1 OpenAI 适配器。
 
-Current scope:
+当前范围：
 
 - `llm.ChatModel.Generate`
-- `Info()` with model-bound provider metadata
-- `Stream()` Phase 1 stub
+- 带模型绑定提供方元数据的 `Info()`
+- `Stream()` Phase 1 桩实现（stub）
 
-Not in scope yet:
+尚未纳入范围：
 
-- tool calling
-- embeddings
-- structured outputs
-- streaming
+- 工具调用
+- 嵌入（embeddings）
+- 结构化输出（structured outputs）
+- 流式
 
-Minimal example:
+最小示例：
 
 ```go
 model, err := openai.New(

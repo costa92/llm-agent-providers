@@ -1,5 +1,7 @@
 # ollama
 
+[English](./README.md) | [简体中文](./README.zh-CN.md)
+
 Phase 1 Ollama adapter for `github.com/costa92/llm-agent/llm`.
 
 Current scope:
