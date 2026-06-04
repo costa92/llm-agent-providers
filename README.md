@@ -29,6 +29,8 @@ go get github.com/costa92/llm-agent-providers/anthropic@latest
 go get github.com/costa92/llm-agent-providers/ollama@latest
 go get github.com/costa92/llm-agent-providers/deepseek@latest
 go get github.com/costa92/llm-agent-providers/minimax@latest
+go get github.com/costa92/llm-agent-providers/volcengine@latest
+go get github.com/costa92/llm-agent-providers/google@latest
 go get github.com/costa92/llm-agent-providers/kimi@latest
 ```
 
@@ -41,6 +43,7 @@ go get github.com/costa92/llm-agent-providers/kimi@latest
 - streaming with usage capture
 - native function/tool calling
 - embeddings
+- image generation (gpt-image / dall-e via `Images.Generate`)
 
 ### Anthropic
 
@@ -73,6 +76,23 @@ go get github.com/costa92/llm-agent-providers/kimi@latest
 - streaming
 - native tool use
 - regional endpoint presets via `WithRegion(...)`
+- image generation (`/v1/image_generation`) + embeddings
+
+### Volcengine
+
+- `volcengine.New(...)` bound-model adapter (火山方舟 Ark / 豆包)
+- sync generate
+- streaming with usage capture
+- native function/tool calling
+- image generation (Seedream) + embeddings
+
+### Google
+
+- `google.New(...)` bound-model adapter (Gemini)
+- sync generate
+- streaming with usage capture
+- native function/tool calling
+- image generation (Nano Banana inline + Imagen) + embeddings
 
 ### Kimi
 
