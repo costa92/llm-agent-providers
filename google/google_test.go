@@ -419,3 +419,70 @@ func TestGenerate_BlockedPrompt(t *testing.T) {
 		t.Errorf("blocked prompt: err = %v, want *llm.InvalidRequestError", err)
 	}
 }
+
+func newTestServerEmbed(t *testing.T, model string, handler http.HandlerFunc, opts ...Option) *Google {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	all := append([]Option{WithModel(model), WithAPIKey("test-key"), WithBaseURL(server.URL)}, opts...)
+	g, err := New(all...)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	return g
+}
+
+func TestEmbed_Happy(t *testing.T) {
+	g := newTestServerEmbed(t, "gemini-embedding-001", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, ":embedContent") && !strings.HasSuffix(r.URL.Path, ":batchEmbedContents") {
+			t.Errorf("path = %s, want embed suffix", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"embeddings":[
+				{"values":[0.1,0.2,0.3]},
+				{"values":[0.4,0.5,0.6]}
+			]
+		}`))
+	}, WithTaskType("RETRIEVAL_DOCUMENT"), WithDimensions(3))
+
+	vecs, usage, err := g.Embed(context.Background(), []string{"alpha", "beta"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if len(vecs) != 2 {
+		t.Fatalf("vectors len = %d, want 2", len(vecs))
+	}
+	if len(vecs[0]) != 3 || vecs[0][0] != 0.1 || vecs[1][2] != 0.6 {
+		t.Errorf("vectors = %+v, want [[0.1 0.2 0.3] [0.4 0.5 0.6]]", vecs)
+	}
+	// Gemini Developer API reports no token usage.
+	if usage.Source != llm.UsageUnknown || usage.TotalTokens != 0 {
+		t.Errorf("usage = %+v, want zero/UsageUnknown", usage)
+	}
+}
+
+func TestEmbed_EmptyInput(t *testing.T) {
+	g, err := New(WithModel("gemini-embedding-001"), WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	vecs, _, err := g.Embed(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Embed(nil): %v", err)
+	}
+	if len(vecs) != 0 {
+		t.Errorf("vectors len = %d, want 0", len(vecs))
+	}
+}
+
+func TestEmbed_NonEmbedModel(t *testing.T) {
+	g, err := New(WithModel("gemini-2.5-flash"), WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, _, err = g.Embed(context.Background(), []string{"x"})
+	if !errors.Is(err, llm.ErrCapabilityNotSupported) {
+		t.Fatalf("Embed on chat model = %v, want ErrCapabilityNotSupported", err)
+	}
+}

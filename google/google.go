@@ -16,7 +16,7 @@ import (
 var (
 	_ llm.ChatModel  = (*Google)(nil)
 	_ llm.ToolCaller = (*Google)(nil)
-	// _ llm.Embedder       = (*Google)(nil) // Task 5 (+ Embed)
+	_ llm.Embedder   = (*Google)(nil)
 	// _ llm.ImageGenerator = (*Google)(nil) // Task 6 (+ GenerateImage)
 )
 
