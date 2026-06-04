@@ -486,3 +486,26 @@ func TestEmbed_NonEmbedModel(t *testing.T) {
 		t.Fatalf("Embed on chat model = %v, want ErrCapabilityNotSupported", err)
 	}
 }
+
+func TestExtraHeaders_Forwarded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Route-Tag"); got != "canary" {
+			t.Errorf("X-Route-Tag = %q, want canary", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP","index":0}]}`))
+	}))
+	t.Cleanup(server.Close)
+	g, err := New(
+		WithModel("gemini-2.5-flash"),
+		WithAPIKey("test-key"),
+		WithBaseURL(server.URL),
+		WithExtraHeaders(map[string]string{"X-Route-Tag": "canary"}),
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	if _, err := g.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "x"}}}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+}
