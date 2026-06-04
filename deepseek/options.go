@@ -22,12 +22,13 @@ const (
 const defaultBaseURL = "https://api.deepseek.com"
 
 type config struct {
-	apiKey     string
-	model      string
-	baseURL    string
-	httpClient *http.Client
-	timeout    time.Duration
-	region     Region
+	apiKey       string
+	model        string
+	baseURL      string
+	httpClient   *http.Client
+	timeout      time.Duration
+	region       Region
+	extraHeaders map[string]string
 }
 
 type Option func(*config)
@@ -43,6 +44,13 @@ func WithHTTPClient(h *http.Client) Option { return func(c *config) { c.httpClie
 func WithTimeout(d time.Duration) Option { return func(c *config) { c.timeout = d } }
 
 func WithRegion(r Region) Option { return func(c *config) { c.region = r } }
+
+// WithExtraHeaders injects additional headers into every outbound request.
+// Reserved headers (Authorization, Content-Type) are not overridable; extra
+// headers are additive via option.WithHeaderAdd.
+func WithExtraHeaders(h map[string]string) Option {
+	return func(c *config) { c.extraHeaders = h }
+}
 
 func baseURLForRegion(r Region) string {
 	switch r {
@@ -87,6 +95,9 @@ func New(opts ...Option) (*DeepSeek, error) {
 	}
 	if cfg.httpClient != nil {
 		sdkOpts = append(sdkOpts, option.WithHTTPClient(cfg.httpClient))
+	}
+	for k, v := range cfg.extraHeaders {
+		sdkOpts = append(sdkOpts, option.WithHeaderAdd(k, v))
 	}
 	if cfg.timeout > 0 {
 		sdkOpts = append(sdkOpts, option.WithRequestTimeout(cfg.timeout))

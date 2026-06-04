@@ -51,8 +51,11 @@ func TestMiniMax_DocumentedEmbeddingGap(t *testing.T) {
 	if info.Capabilities.Embeddings {
 		t.Fatalf("Capabilities = %+v, want embeddings=false", info.Capabilities)
 	}
-	if _, ok := any(m).(llm.Embedder); ok {
-		t.Fatal("MiniMax adapter must not implement llm.Embedder")
+	// *MiniMax now satisfies llm.Embedder for the embo-01 model; embedding
+	// support is gated per bound model (K2) rather than by Go type, so a
+	// non-embed model returns ErrCapabilityNotSupported at call time.
+	if _, _, err := m.Embed(context.Background(), []string{"x"}); !errors.Is(err, llm.ErrCapabilityNotSupported) {
+		t.Fatalf("Embed on non-embed model = %v, want ErrCapabilityNotSupported", err)
 	}
 }
 

@@ -13,12 +13,13 @@ import (
 )
 
 type config struct {
-	apiKey     string
-	model      string
-	baseURL    string
-	httpClient *http.Client
-	timeout    time.Duration
-	betaHeader string
+	apiKey       string
+	model        string
+	baseURL      string
+	httpClient   *http.Client
+	timeout      time.Duration
+	betaHeader   string
+	extraHeaders map[string]string
 }
 
 type Option func(*config)
@@ -34,6 +35,13 @@ func WithHTTPClient(h *http.Client) Option { return func(c *config) { c.httpClie
 func WithTimeout(d time.Duration) Option { return func(c *config) { c.timeout = d } }
 
 func WithBetaHeader(v string) Option { return func(c *config) { c.betaHeader = v } }
+
+// WithExtraHeaders injects additional headers into every outbound request.
+// Reserved headers (Authorization, Content-Type) are not overridable; extra
+// headers are additive via option.WithHeaderAdd.
+func WithExtraHeaders(h map[string]string) Option {
+	return func(c *config) { c.extraHeaders = h }
+}
 
 func New(opts ...Option) (*Anthropic, error) {
 	cfg := config{}
@@ -67,6 +75,9 @@ func New(opts ...Option) (*Anthropic, error) {
 	}
 	if cfg.betaHeader != "" {
 		sdkOpts = append(sdkOpts, option.WithHeader("anthropic-beta", cfg.betaHeader))
+	}
+	for k, v := range cfg.extraHeaders {
+		sdkOpts = append(sdkOpts, option.WithHeaderAdd(k, v))
 	}
 	if cfg.timeout > 0 {
 		sdkOpts = append(sdkOpts, option.WithRequestTimeout(cfg.timeout))

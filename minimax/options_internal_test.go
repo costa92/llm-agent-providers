@@ -32,3 +32,49 @@ func TestNew_RespectsExplicitTimeout(t *testing.T) {
 		t.Errorf("explicit timeout = %v, want 10s", got)
 	}
 }
+
+// raw-HTTP accessors for testing config plumbing.
+func (m *MiniMax) baseURLForTest() string                 { return m.baseURL }
+func (m *MiniMax) apiKeyForTest() string                  { return m.apiKey }
+func (m *MiniMax) extraHeadersForTest() map[string]string { return m.extraHeaders }
+func (m *MiniMax) groupIDForTest() string                 { return m.groupID }
+func (m *MiniMax) embeddingTypeForTest() string           { return m.embeddingType }
+
+func TestNew_RetainsRawHTTPConfig(t *testing.T) {
+	m, err := New(
+		WithModel("image-01"),
+		WithAPIKey("k"),
+		WithBaseURL("https://example.test"),
+		WithExtraHeaders(map[string]string{"X-Trace": "1"}),
+		WithGroupID("grp-9"),
+		WithEmbeddingType("query"),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if m.baseURLForTest() != "https://example.test" {
+		t.Fatalf("baseURL = %q", m.baseURLForTest())
+	}
+	if m.apiKeyForTest() != "k" {
+		t.Fatalf("apiKey = %q", m.apiKeyForTest())
+	}
+	if m.extraHeadersForTest()["X-Trace"] != "1" {
+		t.Fatalf("extraHeaders = %v", m.extraHeadersForTest())
+	}
+	if m.groupIDForTest() != "grp-9" {
+		t.Fatalf("groupID = %q", m.groupIDForTest())
+	}
+	if m.embeddingTypeForTest() != "query" {
+		t.Fatalf("embeddingType = %q", m.embeddingTypeForTest())
+	}
+}
+
+func TestNew_EmbeddingTypeDefaultsDB(t *testing.T) {
+	m, err := New(WithModel("embo-01"), WithAPIKey("k"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := m.embeddingTypeForTest(); got != "db" {
+		t.Fatalf("default embeddingType = %q, want db", got)
+	}
+}

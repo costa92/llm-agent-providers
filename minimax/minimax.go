@@ -3,6 +3,7 @@ package minimax
 import (
 	"context"
 	"io"
+	"net/http"
 	"sync"
 	"time"
 
@@ -12,8 +13,10 @@ import (
 )
 
 var (
-	_ llm.ChatModel  = (*MiniMax)(nil)
-	_ llm.ToolCaller = (*MiniMax)(nil)
+	_ llm.ChatModel      = (*MiniMax)(nil)
+	_ llm.ToolCaller     = (*MiniMax)(nil)
+	_ llm.ImageGenerator = (*MiniMax)(nil)
+	_ llm.Embedder       = (*MiniMax)(nil)
 )
 
 type MiniMax struct {
@@ -21,6 +24,14 @@ type MiniMax struct {
 	info    llm.ProviderInfo
 	tools   []llm.Tool
 	timeout time.Duration
+
+	// Raw-HTTP path config (image generation + embeddings have no SDK surface).
+	baseURL       string
+	apiKey        string
+	httpClient    *http.Client
+	extraHeaders  map[string]string
+	groupID       string
+	embeddingType string
 }
 
 func (m *MiniMax) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {

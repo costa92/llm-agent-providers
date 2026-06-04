@@ -22,12 +22,15 @@ const (
 const defaultBaseURL = "https://api.minimax.chat"
 
 type config struct {
-	apiKey     string
-	model      string
-	baseURL    string
-	httpClient *http.Client
-	timeout    time.Duration
-	region     Region
+	apiKey        string
+	model         string
+	baseURL       string
+	httpClient    *http.Client
+	timeout       time.Duration
+	region        Region
+	extraHeaders  map[string]string
+	groupID       string
+	embeddingType string
 }
 
 type Option func(*config)
@@ -43,6 +46,22 @@ func WithHTTPClient(h *http.Client) Option { return func(c *config) { c.httpClie
 func WithTimeout(d time.Duration) Option { return func(c *config) { c.timeout = d } }
 
 func WithRegion(r Region) Option { return func(c *config) { c.region = r } }
+
+// WithExtraHeaders injects additional headers into every outbound request
+// (chat/stream via the SDK, plus the raw-HTTP image/embed paths). Reserved
+// headers (Authorization, Content-Type) are not overridable; extra headers
+// are additive.
+func WithExtraHeaders(h map[string]string) Option {
+	return func(c *config) { c.extraHeaders = h }
+}
+
+// WithGroupID sets the MiniMax GroupId, passed as a query parameter on the
+// embeddings request. Required for Embed; defaults to env MINIMAX_GROUP_ID.
+func WithGroupID(id string) Option { return func(c *config) { c.groupID = id } }
+
+// WithEmbeddingType sets the embedding "type" field: "db" (document, default)
+// or "query".
+func WithEmbeddingType(t string) Option { return func(c *config) { c.embeddingType = t } }
 
 func baseURLForRegion(r Region) string {
 	switch r {
@@ -63,6 +82,12 @@ func New(opts ...Option) (*MiniMax, error) {
 	}
 	if cfg.apiKey == "" {
 		cfg.apiKey = os.Getenv("MINIMAX_API_KEY")
+	}
+	if cfg.groupID == "" {
+		cfg.groupID = os.Getenv("MINIMAX_GROUP_ID")
+	}
+	if cfg.embeddingType == "" {
+		cfg.embeddingType = "db"
 	}
 	// P1-6/P1-23: default 60s request timeout when caller is silent.
 	// Guards against indefinite hangs on idle HTTP connections. SDK
@@ -88,14 +113,23 @@ func New(opts ...Option) (*MiniMax, error) {
 	if cfg.httpClient != nil {
 		sdkOpts = append(sdkOpts, option.WithHTTPClient(cfg.httpClient))
 	}
+	for k, v := range cfg.extraHeaders {
+		sdkOpts = append(sdkOpts, option.WithHeaderAdd(k, v))
+	}
 	if cfg.timeout > 0 {
 		sdkOpts = append(sdkOpts, option.WithRequestTimeout(cfg.timeout))
 	}
 
 	client := sdk.NewClient(sdkOpts...)
 	return &MiniMax{
-		client:  &client,
-		timeout: cfg.timeout,
+		client:        &client,
+		timeout:       cfg.timeout,
+		baseURL:       baseURL,
+		apiKey:        cfg.apiKey,
+		httpClient:    cfg.httpClient,
+		extraHeaders:  cfg.extraHeaders,
+		groupID:       cfg.groupID,
+		embeddingType: cfg.embeddingType,
 		info: llm.ProviderInfo{
 			Provider:     "minimax",
 			Model:        cfg.model,
