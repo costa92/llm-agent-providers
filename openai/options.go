@@ -19,6 +19,7 @@ type config struct {
 	httpClient   *http.Client
 	timeout      time.Duration
 	organization string
+	extraHeaders map[string]string
 }
 
 type Option func(*config)
@@ -34,6 +35,13 @@ func WithHTTPClient(h *http.Client) Option { return func(c *config) { c.httpClie
 func WithTimeout(d time.Duration) Option { return func(c *config) { c.timeout = d } }
 
 func WithOrganization(o string) Option { return func(c *config) { c.organization = o } }
+
+// WithExtraHeaders injects additional headers into every outbound request
+// (chat/stream/image/embed). Reserved headers (Authorization, Content-Type)
+// are not overridable; extra headers are additive via option.WithHeaderAdd.
+func WithExtraHeaders(h map[string]string) Option {
+	return func(c *config) { c.extraHeaders = h }
+}
 
 func New(opts ...Option) (*OpenAI, error) {
 	cfg := config{}
@@ -67,6 +75,9 @@ func New(opts ...Option) (*OpenAI, error) {
 	}
 	if cfg.organization != "" {
 		sdkOpts = append(sdkOpts, option.WithHeader("OpenAI-Organization", cfg.organization))
+	}
+	for k, v := range cfg.extraHeaders {
+		sdkOpts = append(sdkOpts, option.WithHeaderAdd(k, v))
 	}
 	if cfg.timeout > 0 {
 		sdkOpts = append(sdkOpts, option.WithRequestTimeout(cfg.timeout))
