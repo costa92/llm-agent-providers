@@ -17,7 +17,7 @@ var (
 	_ llm.ChatModel      = (*Volcengine)(nil)
 	_ llm.ToolCaller     = (*Volcengine)(nil)
 	_ llm.ImageGenerator = (*Volcengine)(nil)
-	// _ llm.Embedder asserted once Embed (Task 8) lands.
+	_ llm.Embedder       = (*Volcengine)(nil)
 )
 
 // Volcengine is a 火山方舟 Ark adapter bound to a single model.

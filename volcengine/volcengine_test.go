@@ -405,3 +405,89 @@ func TestGenerateImage_Volcengine_CapabilityGate(t *testing.T) {
 		t.Fatalf("GenerateImage() error = %v, want ErrCapabilityNotSupported", gerr)
 	}
 }
+
+func TestEmbed_Volcengine_Happy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/embeddings" {
+			t.Fatalf("Path = %s, want /embeddings", r.URL.Path)
+		}
+		bodyBytes, _ := io.ReadAll(r.Body)
+		body := string(bodyBytes)
+		if !strings.Contains(body, `"model":"doubao-embedding-text-240715"`) {
+			t.Fatalf("body missing model: %s", body)
+		}
+		if !strings.Contains(body, `"input":["hello","world"]`) {
+			t.Fatalf("body missing ordered input: %s", body)
+		}
+		if !strings.Contains(body, `"dimensions":2560`) {
+			t.Fatalf("body missing dimensions: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"emb_1",
+			"object":"list",
+			"model":"doubao-embedding-text-240715",
+			"data":[
+				{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]},
+				{"object":"embedding","index":1,"embedding":[0.4,0.5,0.6]}
+			],
+			"usage":{"prompt_tokens":4,"total_tokens":4}
+		}`))
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("doubao-embedding-text-240715"), WithAPIKey("k"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	vectors, usage, err := m.Embed(context.Background(), []string{"hello", "world"})
+	if err != nil {
+		t.Fatalf("Embed(): %v", err)
+	}
+	if len(vectors) != 2 || len(vectors[0]) != 3 || len(vectors[1]) != 3 {
+		t.Fatalf("vectors shape = %d x [%d %d], want 2 x [3 3]", len(vectors), len(vectors[0]), len(vectors[1]))
+	}
+	if vectors[1][0] != 0.4 {
+		t.Fatalf("vectors[1][0] = %v, want 0.4 (order preserved)", vectors[1][0])
+	}
+	if usage.Source != llm.UsageReported || usage.InputTokens != 4 || usage.TotalTokens != 4 {
+		t.Fatalf("usage = %+v, want reported input=4 total=4", usage)
+	}
+	if got := m.EmbedDimensions(); got != 2560 {
+		t.Fatalf("EmbedDimensions() = %d, want 2560", got)
+	}
+}
+
+func TestEmbed_Volcengine_Empty(t *testing.T) {
+	m, err := New(WithModel("doubao-embedding-text-240715"), WithAPIKey("k"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	vectors, usage, err := m.Embed(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Embed(nil): %v", err)
+	}
+	if len(vectors) != 0 {
+		t.Fatalf("len(vectors) = %d, want 0", len(vectors))
+	}
+	if usage.Source != llm.UsageReported {
+		t.Fatalf("usage.Source = %q, want reported", usage.Source)
+	}
+}
+
+func TestEmbed_Volcengine_CapabilityGate(t *testing.T) {
+	m, err := New(WithModel("doubao-1-5-pro-32k-250115"), WithAPIKey("k"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	_, _, gerr := m.Embed(context.Background(), []string{"x"})
+	if gerr == nil {
+		t.Fatal("Embed() error = nil, want ErrCapabilityNotSupported")
+	}
+	if !errors.Is(gerr, llm.ErrCapabilityNotSupported) {
+		t.Fatalf("Embed() error = %v, want ErrCapabilityNotSupported", gerr)
+	}
+	if got := m.EmbedDimensions(); got != 0 {
+		t.Fatalf("EmbedDimensions() = %d, want 0 for non-embed model", got)
+	}
+}
