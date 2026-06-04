@@ -6,11 +6,36 @@ this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Phase — P1-23 (PRs 1+2+3 of 3): extract shared SDK error mapping and
-default-timeout into `internal/compat/`; migrate `openai/`, `deepseek/`,
-`anthropic/`, `minimax/`, and finally `ollama/` (default-timeout call
-swap only — Path A). Plus P1-6 ollama closure (5/5). Plus K1 keystone
-ollama YELLOW → GREEN via cross-provider conformance gate (2026-05-23).
+Nothing yet.
+
+## [v0.3.1] - 2026-06-03
+
+### Fixed
+
+- **ollama**: qwen tool calls returned as a ```` ```json ```` markdown fenced
+  block in message content are now unwrapped before the bare-JSON fallback in
+  `parseQwenToolCalls`, so `qwen2.5-coder` / `qwen3-coder` tool calls are
+  extracted and executed instead of silently dropped (#38). `llama3.1` (native
+  `tool_calls`) was unaffected. Verified end-to-end against live
+  `qwen2.5-coder` and `llama3.1` via the `llm-agent` `10-ollama-tools` example.
+
+### Changed
+
+- Pinned `llm-agent-contract` to v0.2.0 (#36).
+
+## [v0.3.0] - 2026-06-03
+
+### Changed
+
+- Finalized the `llm-agent-contract` decoupling: every provider imports the
+  contract types from `github.com/costa92/llm-agent-contract` directly, pinned
+  at v0.1.0 with zero `replace` directives. Pure import-path migration across
+  all five providers; no behavior or public-surface change.
+
+## [v0.2.5] - 2026-05-23
+
+K1 keystone — ollama YELLOW → GREEN via cross-provider conformance gate. Test
++ doc only; zero production code changes.
 
 ### Added (K1 keystone — closes ollama YELLOW)
 
@@ -40,7 +65,7 @@ ollama YELLOW → GREEN via cross-provider conformance gate (2026-05-23).
   `docs/ecosystem-design-review.zh-CN.md` is updated in a paired
   umbrella-repo commit. Keystone scorecard now reads **12 GREEN / 0
   YELLOW / 0 RED**.
-- Zero production code changes in this PR. Pure test + doc work.
+- Zero production code changes in this release. Pure test + doc work.
 
 ### Deferred (Phase 2 / v0.6.0 follow-up)
 
@@ -52,6 +77,13 @@ ollama YELLOW → GREEN via cross-provider conformance gate (2026-05-23).
   fixtures are hand-crafted from validated per-provider test wire
   shapes (same validity, faster to ship). If `nightly-ollama-live.yml`
   observes a wire-shape drift, refresh from real capture.
+
+## [v0.2.4] - 2026-05-23
+
+Phase — P1-23 (PRs 1+2+3 of 3): extract shared SDK error mapping and
+default-timeout into `internal/compat/`; migrate `openai/`, `deepseek/`,
+`anthropic/`, `minimax/`, and finally `ollama/` (default-timeout call
+swap only — Path A). Plus P1-6 ollama closure (5/5).
 
 ### Refactored (P1-23 PR 1 of 3)
 
