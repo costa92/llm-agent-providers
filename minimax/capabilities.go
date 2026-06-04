@@ -17,6 +17,8 @@ func capabilitiesForModel(model string) llm.Capabilities {
 		return llm.Capabilities{Tools: true}
 	case "image-01":
 		return llm.Capabilities{ImageGeneration: true}
+	case "embo-01":
+		return llm.Capabilities{Embeddings: true}
 	default:
 		return llm.Capabilities{Tools: true} // fallback: assume tools (behavior-preserving with prior hardcoded default)
 	}

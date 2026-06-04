@@ -16,6 +16,7 @@ var (
 	_ llm.ChatModel      = (*MiniMax)(nil)
 	_ llm.ToolCaller     = (*MiniMax)(nil)
 	_ llm.ImageGenerator = (*MiniMax)(nil)
+	_ llm.Embedder       = (*MiniMax)(nil)
 )
 
 type MiniMax struct {
