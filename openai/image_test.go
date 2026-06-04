@@ -37,3 +37,42 @@ func TestWithExtraHeaders_OpenAI_AppliedToRequests(t *testing.T) {
 		t.Fatalf("X-My-Gateway = %q, want route-42", gotHeader)
 	}
 }
+
+func TestInfo_OpenAI_ImageModel(t *testing.T) {
+	o, err := New(WithModel("gpt-image-1"), WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	caps := o.Info().Capabilities
+	if !caps.ImageGeneration {
+		t.Fatalf("Capabilities = %+v, want ImageGeneration=true", caps)
+	}
+	if caps.Embeddings {
+		t.Fatalf("image model must not report Embeddings: %+v", caps)
+	}
+}
+
+func TestInfo_OpenAI_ChatModelNoImage(t *testing.T) {
+	o, err := New(WithModel("gpt-4o-mini"), WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	if o.Info().Capabilities.ImageGeneration {
+		t.Fatalf("gpt-4o-mini must not report ImageGeneration")
+	}
+}
+
+func TestIsImageModel_OpenAI(t *testing.T) {
+	imageModels := []string{"gpt-image-1", "gpt-image-2", "dall-e-2", "dall-e-3"}
+	for _, m := range imageModels {
+		if !isImageModel(m) {
+			t.Errorf("isImageModel(%q) = false, want true", m)
+		}
+	}
+	chatModels := []string{"gpt-4o-mini", "text-embedding-3-small", ""}
+	for _, m := range chatModels {
+		if isImageModel(m) {
+			t.Errorf("isImageModel(%q) = true, want false", m)
+		}
+	}
+}

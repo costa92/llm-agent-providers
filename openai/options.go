@@ -100,6 +100,7 @@ func New(opts ...Option) (*OpenAI, error) {
 				Embeddings:        embeddings,
 				StructuredOutputs: false,
 				PromptCaching:     false,
+				ImageGeneration:   isImageModel(cfg.model),
 			},
 		},
 	}, nil
