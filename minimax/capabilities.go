@@ -15,6 +15,8 @@ func capabilitiesForModel(model string) llm.Capabilities {
 	switch model {
 	case "MiniMax-M1":
 		return llm.Capabilities{Tools: true}
+	case "image-01":
+		return llm.Capabilities{ImageGeneration: true}
 	default:
 		return llm.Capabilities{Tools: true} // fallback: assume tools (behavior-preserving with prior hardcoded default)
 	}
