@@ -135,3 +135,12 @@ func mapFinishReason(r model.FinishReason) llm.FinishReason {
 		return llm.FinishReasonUnknown
 	}
 }
+
+// toSDKStreamRequest builds the streaming variant: same as toSDKRequest but
+// with StreamOptions.IncludeUsage so the final chunk carries token usage.
+// (The SDK sets Stream=true internally via request.WithStream(true).)
+func (v *Volcengine) toSDKStreamRequest(req llm.Request) model.CreateChatCompletionRequest {
+	out := v.toSDKRequest(req)
+	out.StreamOptions = &model.StreamOptions{IncludeUsage: true}
+	return out
+}

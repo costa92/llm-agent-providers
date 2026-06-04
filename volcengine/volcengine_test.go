@@ -2,6 +2,7 @@ package volcengine
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -150,5 +151,89 @@ func TestWithTools_Volcengine_Immutable(t *testing.T) {
 	}
 	if len(base.tools) != 0 {
 		t.Fatalf("base.tools mutated, len = %d, want 0", len(base.tools))
+	}
+}
+
+func TestStream_Volcengine_Text(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fl, _ := w.(http.Flusher)
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"doubao-1-5-pro-32k-250115\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"},\"finish_reason\":\"\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"doubao-1-5-pro-32k-250115\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"doubao-1-5-pro-32k-250115\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if fl != nil {
+			fl.Flush()
+		}
+	}))
+	defer server.Close()
+
+	m, err := New(WithModel("doubao-1-5-pro-32k-250115"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	sr, err := m.Stream(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	defer sr.Close()
+
+	resp, err := llm.AccumulateStream(sr)
+	if err != nil {
+		t.Fatalf("AccumulateStream(): %v", err)
+	}
+	if resp.Text != "hello" {
+		t.Fatalf("Text = %q, want hello", resp.Text)
+	}
+	if resp.FinishReason != llm.FinishReasonStop {
+		t.Fatalf("FinishReason = %q, want stop", resp.FinishReason)
+	}
+	if resp.Usage.Source != llm.UsageReported || resp.Usage.TotalTokens != 5 {
+		t.Fatalf("Usage = %+v, want reported total=5", resp.Usage)
+	}
+}
+
+func TestStream_Volcengine_FragmentedToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"c2\",\"model\":\"doubao-1-5-pro-32k-250115\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_calc\",\"type\":\"function\",\"function\":{\"name\":\"calc\",\"arguments\":\"{\\\"expr\\\":\"}},{\"index\":1,\"id\":\"call_search\",\"type\":\"function\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\"}}]},\"finish_reason\":\"\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"c2\",\"model\":\"doubao-1-5-pro-32k-250115\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"2+2\\\"}\"}},{\"index\":1,\"function\":{\"arguments\":\"\\\"weather\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"c2\",\"model\":\"doubao-1-5-pro-32k-250115\",\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":5,\"total_tokens\":14}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	base, err := New(WithModel("doubao-1-5-pro-32k-250115"), WithAPIKey("test-key"), WithBaseURL(server.URL))
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	m, err := base.WithTools([]llm.Tool{
+		{Name: "calc", Parameters: []byte(`{"type":"object"}`)},
+		{Name: "search", Parameters: []byte(`{"type":"object"}`)},
+	})
+	if err != nil {
+		t.Fatalf("WithTools(): %v", err)
+	}
+	sr, err := m.Stream(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "use tools"}}})
+	if err != nil {
+		t.Fatalf("Stream(): %v", err)
+	}
+	defer sr.Close()
+
+	resp, err := llm.AccumulateStream(sr)
+	if err != nil {
+		t.Fatalf("AccumulateStream(): %v", err)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("len(ToolCalls) = %d, want 2", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].ID != "call_calc" || resp.ToolCalls[0].Name != "calc" || string(resp.ToolCalls[0].Arguments) != `{"expr":"2+2"}` {
+		t.Fatalf("ToolCalls[0] = %+v args=%s, want calc {\"expr\":\"2+2\"}", resp.ToolCalls[0], resp.ToolCalls[0].Arguments)
+	}
+	if resp.ToolCalls[1].ID != "call_search" || resp.ToolCalls[1].Name != "search" || string(resp.ToolCalls[1].Arguments) != `{"q":"weather"}` {
+		t.Fatalf("ToolCalls[1] = %+v args=%s, want search {\"q\":\"weather\"}", resp.ToolCalls[1], resp.ToolCalls[1].Arguments)
+	}
+	if resp.FinishReason != llm.FinishReasonToolCalls {
+		t.Fatalf("FinishReason = %q, want tool_calls", resp.FinishReason)
 	}
 }
