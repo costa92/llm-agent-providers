@@ -8,8 +8,8 @@ import (
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/costa92/llm-agent-providers/internal/compat"
 	"github.com/costa92/llm-agent-contract/llm"
+	"github.com/costa92/llm-agent-providers/internal/compat"
 )
 
 type config struct {
@@ -95,6 +95,7 @@ func New(opts ...Option) (*Anthropic, error) {
 				Embeddings:        false,
 				StructuredOutputs: false,
 				PromptCaching:     false,
+				Vision:            isVisionModel(cfg.model),
 			},
 		},
 	}, nil

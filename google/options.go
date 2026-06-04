@@ -114,11 +114,14 @@ func New(opts ...Option) (*Google, error) {
 // capabilitiesForModel binds capabilities to the (provider × model) tuple.
 //
 //   - Tools: gemini-* chat models (NOT image, NOT embedding variants).
+//   - Vision: same as Tools — every Gemini generative chat model is multimodal
+//     and accepts image input.
 //   - ImageGeneration: gemini-*-image and imagen-* models.
 //   - Embeddings: models whose id contains "embedding".
 func capabilitiesForModel(model string) llm.Capabilities {
 	return llm.Capabilities{
 		Tools:           isChatModel(model),
+		Vision:          isChatModel(model),
 		ImageGeneration: isImageModel(model),
 		Embeddings:      isEmbedModel(model),
 	}

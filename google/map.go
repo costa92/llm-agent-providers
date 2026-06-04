@@ -1,7 +1,9 @@
 package google
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"strings"
 
 	"github.com/costa92/llm-agent-contract/llm"
 	"google.golang.org/genai"
@@ -24,10 +26,67 @@ func toContents(req llm.Request) []*genai.Content {
 		}
 		contents = append(contents, &genai.Content{
 			Role:  role,
-			Parts: []*genai.Part{{Text: m.Content}},
+			Parts: userParts(m),
 		})
 	}
 	return contents
+}
+
+// userParts builds the Gemini Part list for a dialog turn. With no images it is
+// the single text part (unchanged behavior). With images, a text part is
+// emitted only when Content is non-empty, followed by one image part each:
+//   - Bytes -> InlineData (genai.Blob) with MIMEType (default image/png).
+//   - URL that is a data: URI -> decoded into InlineData.
+//   - URL that is http(s)/gs -> FileData (genai.FileData) with FileURI+MIMEType.
+func userParts(m llm.Message) []*genai.Part {
+	if len(m.Images) == 0 {
+		return []*genai.Part{{Text: m.Content}}
+	}
+	parts := make([]*genai.Part, 0, len(m.Images)+1)
+	if m.Content != "" {
+		parts = append(parts, &genai.Part{Text: m.Content})
+	}
+	for _, img := range m.Images {
+		switch {
+		case len(img.Bytes) > 0:
+			parts = append(parts, &genai.Part{InlineData: &genai.Blob{Data: img.Bytes, MIMEType: defaultMime(img.MimeType)}})
+		case strings.HasPrefix(img.URL, "data:"):
+			mime, data := decodeDataURI(img.URL)
+			parts = append(parts, &genai.Part{InlineData: &genai.Blob{Data: data, MIMEType: mime}})
+		case img.URL != "":
+			parts = append(parts, &genai.Part{FileData: &genai.FileData{FileURI: img.URL, MIMEType: defaultMime(img.MimeType)}})
+		}
+	}
+	return parts
+}
+
+func defaultMime(mime string) string {
+	if mime == "" {
+		return "image/png"
+	}
+	return mime
+}
+
+// decodeDataURI parses "data:<mime>;base64,<payload>" into (mime, rawBytes).
+// On any parse failure it returns ("image/png", nil).
+func decodeDataURI(uri string) (mime string, data []byte) {
+	rest, ok := strings.CutPrefix(uri, "data:")
+	if !ok {
+		return "image/png", nil
+	}
+	meta, payload, ok := strings.Cut(rest, ",")
+	if !ok {
+		return "image/png", nil
+	}
+	mime = strings.TrimSuffix(meta, ";base64")
+	if mime == "" {
+		mime = "image/png"
+	}
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return mime, nil
+	}
+	return mime, decoded
 }
 
 // toGenConfig maps request knobs + bound tools to a GenerateContentConfig.

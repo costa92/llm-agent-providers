@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/costa92/llm-agent-contract/llm"
 	openai "github.com/openai/openai-go/v3"
@@ -18,6 +19,32 @@ func isImageModel(model string) bool {
 	switch model {
 	case "gpt-image-1", "gpt-image-1-mini", "gpt-image-2",
 		"gpt-image-2-2026-04-21", "dall-e-2", "dall-e-3":
+		return true
+	default:
+		return false
+	}
+}
+
+// isVisionModel reports whether the bound chat model can accept image input
+// (vision / image-understanding). Mirrors the isImageModel gating style (K2:
+// capabilities are per provider×model). True for the multimodal GPT-4o family,
+// gpt-4-turbo, the gpt-4.1/4.5 families, and the o-series reasoning models;
+// false for gpt-3.5*, the legacy text gpt-4, embeddings, and image models.
+func isVisionModel(model string) bool {
+	switch {
+	case strings.HasPrefix(model, "gpt-3.5"),
+		strings.HasPrefix(model, "text-embedding-"),
+		strings.HasPrefix(model, "dall-e-"),
+		strings.HasPrefix(model, "gpt-image-"):
+		return false
+	case model == "chatgpt-4o-latest",
+		strings.HasPrefix(model, "gpt-4o"),
+		strings.HasPrefix(model, "gpt-4-turbo"),
+		strings.HasPrefix(model, "gpt-4.1"),
+		strings.HasPrefix(model, "gpt-4.5"),
+		model == "o1", strings.HasPrefix(model, "o1-"),
+		model == "o3", strings.HasPrefix(model, "o3-"),
+		strings.HasPrefix(model, "o4-mini"):
 		return true
 	default:
 		return false

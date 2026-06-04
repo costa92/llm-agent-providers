@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/costa92/llm-agent-providers/internal/compat"
 	"github.com/costa92/llm-agent-contract/llm"
+	"github.com/costa92/llm-agent-providers/internal/compat"
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
@@ -100,6 +100,7 @@ func New(opts ...Option) (*OpenAI, error) {
 				Embeddings:        embeddings,
 				StructuredOutputs: false,
 				PromptCaching:     false,
+				Vision:            isVisionModel(cfg.model),
 				ImageGeneration:   isImageModel(cfg.model),
 			},
 		},

@@ -1,11 +1,33 @@
 package anthropic
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"strings"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/costa92/llm-agent-contract/llm"
 )
+
+// isVisionModel reports whether the bound Claude model accepts image input.
+// All modern Claude families are multimodal: Claude 3 (claude-3-*) and Claude 4
+// (claude-{sonnet,opus,haiku}-4* and other claude-*-4* ids). The legacy Claude 2
+// and instant models are text-only.
+func isVisionModel(model string) bool {
+	switch {
+	case strings.HasPrefix(model, "claude-2"),
+		strings.HasPrefix(model, "claude-instant"):
+		return false
+	case strings.HasPrefix(model, "claude-3"),
+		strings.HasPrefix(model, "claude-sonnet-4"),
+		strings.HasPrefix(model, "claude-opus-4"),
+		strings.HasPrefix(model, "claude-haiku-4"),
+		strings.Contains(model, "-4"):
+		return true
+	default:
+		return false
+	}
+}
 
 func (a *Anthropic) toSDKRequest(req llm.Request) sdk.MessageNewParams {
 	msgs := make([]sdk.MessageParam, 0, len(req.Messages))
@@ -14,7 +36,12 @@ func (a *Anthropic) toSDKRequest(req llm.Request) sdk.MessageNewParams {
 	for _, m := range req.Messages {
 		switch m.Role {
 		case "user":
-			msgs = append(msgs, sdk.NewUserMessage(sdk.NewTextBlock(m.Content)))
+			if len(m.Images) == 0 {
+				// Text-only: keep the single text-block form (no regression).
+				msgs = append(msgs, sdk.NewUserMessage(sdk.NewTextBlock(m.Content)))
+			} else {
+				msgs = append(msgs, sdk.NewUserMessage(userContentBlocks(m)...))
+			}
 		case "assistant":
 			msgs = append(msgs, sdk.NewAssistantMessage(sdk.NewTextBlock(m.Content)))
 		case "system":
@@ -58,6 +85,56 @@ func (a *Anthropic) toSDKRequest(req llm.Request) sdk.MessageNewParams {
 		}
 	}
 	return p
+}
+
+// userContentBlocks builds the Anthropic content-block list for a user message
+// that carries images: an optional leading text block followed by one image
+// block per image.
+//
+// Bytes -> a base64 image source via sdk.NewImageBlockBase64(mediaType, data),
+// defaulting the media type to image/png. For URL: a data: URI is split into
+// its media type + base64 payload and sent as a base64 source (so callers can
+// pass inline data uniformly); a plain http(s) URL uses the SDK's URL image
+// source via sdk.NewImageBlock(sdk.URLImageSourceParam{URL: ...}).
+func userContentBlocks(m llm.Message) []sdk.ContentBlockParamUnion {
+	blocks := make([]sdk.ContentBlockParamUnion, 0, len(m.Images)+1)
+	if m.Content != "" {
+		blocks = append(blocks, sdk.NewTextBlock(m.Content))
+	}
+	for _, img := range m.Images {
+		switch {
+		case len(img.Bytes) > 0:
+			mime := img.MimeType
+			if mime == "" {
+				mime = "image/png"
+			}
+			blocks = append(blocks, sdk.NewImageBlockBase64(mime, base64.StdEncoding.EncodeToString(img.Bytes)))
+		case strings.HasPrefix(img.URL, "data:"):
+			mime, data := splitDataURI(img.URL)
+			blocks = append(blocks, sdk.NewImageBlockBase64(mime, data))
+		case img.URL != "":
+			blocks = append(blocks, sdk.NewImageBlock(sdk.URLImageSourceParam{URL: img.URL}))
+		}
+	}
+	return blocks
+}
+
+// splitDataURI parses "data:<mime>;base64,<payload>" into (mime, payload). When
+// the input is not a well-formed base64 data URI it returns ("image/png", "").
+func splitDataURI(uri string) (mime, data string) {
+	rest, ok := strings.CutPrefix(uri, "data:")
+	if !ok {
+		return "image/png", ""
+	}
+	meta, payload, ok := strings.Cut(rest, ",")
+	if !ok {
+		return "image/png", ""
+	}
+	mime = strings.TrimSuffix(meta, ";base64")
+	if mime == "" {
+		mime = "image/png"
+	}
+	return mime, payload
 }
 
 func (a *Anthropic) fromSDKResponse(m *sdk.Message) llm.Response {
