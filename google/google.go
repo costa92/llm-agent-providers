@@ -53,6 +53,9 @@ func (g *Google) Generate(ctx context.Context, req llm.Request) (llm.Response, e
 	if err != nil {
 		return llm.Response{}, wrapErr(err)
 	}
+	if blocked := blockedPromptErr(resp); blocked != nil {
+		return llm.Response{}, blocked
+	}
 	return g.fromResponse(resp), nil
 }
 

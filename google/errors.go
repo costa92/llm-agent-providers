@@ -3,6 +3,7 @@ package google
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 
 	"github.com/costa92/llm-agent-contract/llm"
@@ -38,4 +39,21 @@ func wrapErr(err error) error {
 		return &llm.TransientError{Provider: "google", Wrapped: err}
 	}
 	return &llm.InvalidRequestError{Provider: "google", Wrapped: err}
+}
+
+// blockedPromptErr returns an InvalidRequestError when the response carries a
+// PromptFeedback block reason and no candidates (Gemini returns HTTP 200 in
+// this case). Returns nil otherwise.
+func blockedPromptErr(resp *genai.GenerateContentResponse) error {
+	if resp == nil {
+		return nil
+	}
+	if len(resp.Candidates) == 0 && resp.PromptFeedback != nil && resp.PromptFeedback.BlockReason != "" {
+		return &llm.InvalidRequestError{
+			Provider: "google",
+			Wrapped: fmt.Errorf("prompt blocked: %s (%s)",
+				resp.PromptFeedback.BlockReason, resp.PromptFeedback.BlockReasonMessage),
+		}
+	}
+	return nil
 }

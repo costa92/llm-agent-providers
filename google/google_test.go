@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -372,5 +373,49 @@ func TestStream_AccumulateParity(t *testing.T) {
 	}
 	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "f" {
 		t.Fatalf("accumulated ToolCalls = %+v, want one named f", resp.ToolCalls)
+	}
+}
+
+func TestWrapErr_StatusMapping(t *testing.T) {
+	cases := []struct {
+		code   int
+		expect func(error) bool
+	}{
+		{401, func(e error) bool { var a *llm.AuthError; return errors.As(e, &a) }},
+		{403, func(e error) bool { var a *llm.AuthError; return errors.As(e, &a) }},
+		{429, func(e error) bool { var a *llm.RateLimitError; return errors.As(e, &a) }},
+		{500, func(e error) bool { var a *llm.TransientError; return errors.As(e, &a) }},
+		{503, func(e error) bool { var a *llm.TransientError; return errors.As(e, &a) }},
+		{400, func(e error) bool { var a *llm.InvalidRequestError; return errors.As(e, &a) }},
+	}
+	for _, tc := range cases {
+		g := newTestServer(t, "gemini-2.5-flash", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(tc.code)
+			_, _ = w.Write([]byte(`{"error":{"code":` + strconv.Itoa(tc.code) + `,"status":"X","message":"boom"}}`))
+		})
+		_, err := g.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "x"}}})
+		if err == nil {
+			t.Fatalf("code %d: Generate err = nil, want typed error", tc.code)
+		}
+		if !tc.expect(err) {
+			t.Errorf("code %d: wrong error type: %v", tc.code, err)
+		}
+	}
+}
+
+func TestGenerate_BlockedPrompt(t *testing.T) {
+	g := newTestServer(t, "gemini-2.5-flash", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// 200 OK but no candidates; prompt blocked.
+		_, _ = w.Write([]byte(`{"promptFeedback":{"blockReason":"SAFETY","blockReasonMessage":"blocked"}}`))
+	})
+	_, err := g.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "x"}}})
+	if err == nil {
+		t.Fatal("blocked prompt: Generate err = nil, want InvalidRequestError")
+	}
+	var inv *llm.InvalidRequestError
+	if !errors.As(err, &inv) {
+		t.Errorf("blocked prompt: err = %v, want *llm.InvalidRequestError", err)
 	}
 }
