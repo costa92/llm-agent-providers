@@ -1,6 +1,7 @@
 package kimi
 
 import (
+	"encoding/base64"
 	"encoding/json"
 
 	"github.com/costa92/llm-agent-contract/llm"
@@ -17,7 +18,12 @@ func (k *Kimi) toSDKRequest(req llm.Request) openai.ChatCompletionNewParams {
 	for _, m := range req.Messages {
 		switch m.Role {
 		case "user":
-			msgs = append(msgs, openai.UserMessage(m.Content))
+			if len(m.Images) == 0 {
+				// Text-only: keep the plain-string content form (no regression).
+				msgs = append(msgs, openai.UserMessage(m.Content))
+			} else {
+				msgs = append(msgs, openai.UserMessage(userContentParts(m)))
+			}
 		case "assistant":
 			msgs = append(msgs, openai.AssistantMessage(m.Content))
 		case "system":
@@ -53,6 +59,36 @@ func (k *Kimi) toSDKRequest(req llm.Request) openai.ChatCompletionNewParams {
 		}
 	}
 	return p
+}
+
+// userContentParts builds the OpenAI-compatible multimodal content array for a
+// user message that carries images: an optional leading text part followed by
+// one image_url part per image. Moonshot/Kimi accepts only base64 data: URIs
+// (and file-ids), not http URLs, so Bytes is the primary path and is encoded as
+// data:<MimeType>;base64,<...>; when MimeType is empty it defaults to image/png.
+// If URL is set instead it is passed through verbatim (the caller is responsible
+// for it being a data: URI Moonshot accepts).
+func userContentParts(m llm.Message) []openai.ChatCompletionContentPartUnionParam {
+	parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(m.Images)+1)
+	if m.Content != "" {
+		parts = append(parts, openai.TextContentPart(m.Content))
+	}
+	for _, img := range m.Images {
+		url := img.URL
+		if len(img.Bytes) > 0 {
+			mime := img.MimeType
+			if mime == "" {
+				mime = "image/png"
+			}
+			url = "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(img.Bytes)
+		}
+		imageURL := openai.ChatCompletionContentPartImageImageURLParam{URL: url}
+		if img.Detail != "" {
+			imageURL.Detail = img.Detail
+		}
+		parts = append(parts, openai.ImageContentPart(imageURL))
+	}
+	return parts
 }
 
 func (k *Kimi) toSDKStreamRequest(req llm.Request) openai.ChatCompletionNewParams {
