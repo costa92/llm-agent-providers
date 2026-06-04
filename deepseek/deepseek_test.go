@@ -66,6 +66,39 @@ func TestBaseURL_OverridesRegion_DeepSeek(t *testing.T) {
 	}
 }
 
+func TestExtraHeaders_DeepSeek_Forwarded(t *testing.T) {
+	var seenHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHeader = r.Header.Get("X-Gateway-Route")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl_123",
+			"object":"chat.completion",
+			"created":1710000000,
+			"model":"deepseek-chat",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop","logprobs":null}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
+	m, err := New(
+		WithModel("deepseek-chat"),
+		WithAPIKey("test-key"),
+		WithBaseURL(server.URL),
+		WithExtraHeaders(map[string]string{"X-Gateway-Route": "canary"}),
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	if _, err := m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if seenHeader != "canary" {
+		t.Fatalf("X-Gateway-Route = %q, want canary", seenHeader)
+	}
+}
+
 func TestGenerate_DeepSeek_Happy(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
