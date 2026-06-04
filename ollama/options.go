@@ -15,10 +15,11 @@ import (
 )
 
 type config struct {
-	model      string
-	baseURL    string
-	httpClient *http.Client
-	timeout    time.Duration
+	model        string
+	baseURL      string
+	httpClient   *http.Client
+	timeout      time.Duration
+	extraHeaders map[string]string
 }
 
 type Option func(*config)
@@ -33,13 +34,34 @@ func WithHTTPClient(h *http.Client) Option { return func(c *config) { c.httpClie
 
 func WithTimeout(d time.Duration) Option { return func(c *config) { c.timeout = d } }
 
+// WithExtraHeaders injects additional headers into every outbound request.
+// Reserved headers (Authorization, Content-Type) are not overridable; extra
+// headers are additive — set on the outbound *http.Request in RoundTrip.
+func WithExtraHeaders(h map[string]string) Option {
+	return func(c *config) { c.extraHeaders = h }
+}
+
 type statusCapturingTransport struct {
 	inner          http.RoundTripper
 	last           *int32
 	lastRetryAfter *atomic.Pointer[string]
+	extraHeaders   map[string]string
+}
+
+// reservedHeaders are owned by the SDK/transport and must not be overridden
+// by caller-supplied extra headers.
+var reservedHeaders = map[string]struct{}{
+	"Authorization": {},
+	"Content-Type":  {},
 }
 
 func (t *statusCapturingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	for k, v := range t.extraHeaders {
+		if _, ok := reservedHeaders[http.CanonicalHeaderKey(k)]; ok {
+			continue
+		}
+		req.Header.Add(k, v)
+	}
 	resp, err := t.inner.RoundTrip(req)
 	if resp != nil {
 		atomic.StoreInt32(t.last, int32(resp.StatusCode))
@@ -111,6 +133,7 @@ func New(opts ...Option) (*Ollama, error) {
 		inner:          inner,
 		last:           lastStatus,
 		lastRetryAfter: lastRetryAfter,
+		extraHeaders:   cfg.extraHeaders,
 	}
 
 	// Derived clients: only the *http.Client is cloned; the transport

@@ -277,6 +277,31 @@ func TestGenerate_Ollama_Happy(t *testing.T) {
 	}
 }
 
+func TestExtraHeaders_Ollama_Forwarded(t *testing.T) {
+	var seenHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHeader = r.Header.Get("X-Gateway-Route")
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"llama3.1:8b","created_at":"2026-05-10T00:00:00Z","message":{"role":"assistant","content":"ok"},"done":true,"done_reason":"stop","prompt_eval_count":1,"eval_count":1}` + "\n"))
+	}))
+	defer server.Close()
+
+	m, err := New(
+		WithModel("llama3.1:8b"),
+		WithBaseURL(server.URL),
+		WithExtraHeaders(map[string]string{"X-Gateway-Route": "canary"}),
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	if _, err := m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if seenHeader != "canary" {
+		t.Fatalf("X-Gateway-Route = %q, want canary", seenHeader)
+	}
+}
+
 func TestWithTools_Ollama_UnsupportedModel(t *testing.T) {
 	m, err := New(WithModel("llama2"), WithBaseURL("http://localhost:11434"))
 	if err != nil {
