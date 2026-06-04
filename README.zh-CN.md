@@ -123,16 +123,16 @@ go mod edit -replace=github.com/costa92/llm-agent=../llm-agent
 
 完整的多仓治理设计，包括 `llm-agent`、`llm-agent-rag`、`llm-agent-flow`、`llm-agent-providers`、`llm-agent-otel` 与 `llm-agent-customer-support` 之间的关系，位于核心仓库文档中：
 
-- [`PR-GOVERNANCE-OVERVIEW.md`](https://github.com/costa92/llm-agent/blob/main/docs/PR-GOVERNANCE-OVERVIEW.md)
-- [`PR-GOVERNANCE-PROJECTS.md`](https://github.com/costa92/llm-agent/blob/main/docs/PR-GOVERNANCE-PROJECTS.md)
-- [`PR-GOVERNANCE-RULES.md`](https://github.com/costa92/llm-agent/blob/main/docs/PR-GOVERNANCE-RULES.md)
-- [`PR-GOVERNANCE-OPERATIONS.md`](https://github.com/costa92/llm-agent/blob/main/docs/PR-GOVERNANCE-OPERATIONS.md)
+- [`PR-GOVERNANCE-OVERVIEW.md`](https://github.com/costa92/llm-agent/blob/main/docs/PR-GOVERNANCE-OVERVIEW.zh-CN.md)
+- [`PR-GOVERNANCE-PROJECTS.md`](https://github.com/costa92/llm-agent/blob/main/docs/PR-GOVERNANCE-PROJECTS.zh-CN.md)
+- [`PR-GOVERNANCE-RULES.md`](https://github.com/costa92/llm-agent/blob/main/docs/PR-GOVERNANCE-RULES.zh-CN.md)
+- [`PR-GOVERNANCE-OPERATIONS.md`](https://github.com/costa92/llm-agent/blob/main/docs/PR-GOVERNANCE-OPERATIONS.zh-CN.md)
 
 ## 另见
 
-- [`llm-agent` CLAUDE.md](https://github.com/costa92/llm-agent/blob/main/CLAUDE.md) —— 项目硬性规则（仅标准库核心、不使用 K8s、按 (provider x model) 区分能力）。
+- [`llm-agent` CLAUDE.md](https://github.com/costa92/llm-agent/blob/main/CLAUDE.zh-CN.md) —— 项目硬性规则（仅标准库核心、不使用 K8s、按 (provider x model) 区分能力）。
 - [`llm-agent` ROADMAP](https://github.com/costa92/llm-agent/blob/main/.planning/ROADMAP.md) —— 8 阶段 v0.3 里程碑计划。
-- [`DEPRECATIONS.md`](https://github.com/costa92/llm-agent/blob/main/DEPRECATIONS.md) —— 当前 `llm-agent` 的移除跟踪。
+- [`DEPRECATIONS.md`](https://github.com/costa92/llm-agent/blob/main/DEPRECATIONS.zh-CN.md) —— 当前 `llm-agent` 的移除跟踪。
 
 ## 许可证
 
