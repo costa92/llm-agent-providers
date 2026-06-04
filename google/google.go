@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	_ llm.ChatModel  = (*Google)(nil)
-	_ llm.ToolCaller = (*Google)(nil)
-	_ llm.Embedder   = (*Google)(nil)
-	// _ llm.ImageGenerator = (*Google)(nil) // Task 6 (+ GenerateImage)
+	_ llm.ChatModel      = (*Google)(nil)
+	_ llm.ToolCaller     = (*Google)(nil)
+	_ llm.Embedder       = (*Google)(nil)
+	_ llm.ImageGenerator = (*Google)(nil)
 )
 
 // Google is a Gemini provider bound to one model. Safe for concurrent use.
