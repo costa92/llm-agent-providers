@@ -368,6 +368,41 @@ func TestGenerate_Anthropic_Happy(t *testing.T) {
 	}
 }
 
+func TestExtraHeaders_Anthropic_Forwarded(t *testing.T) {
+	var seenHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHeader = r.Header.Get("X-Gateway-Route")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_123",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-3-5-haiku-20241022",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"stop_sequence":null,
+			"usage":{"input_tokens":11,"output_tokens":7}
+		}`))
+	}))
+	defer server.Close()
+
+	m, err := New(
+		WithModel("claude-3-5-haiku-20241022"),
+		WithAPIKey("test-key"),
+		WithBaseURL(server.URL),
+		WithExtraHeaders(map[string]string{"X-Gateway-Route": "canary"}),
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	if _, err := m.Generate(context.Background(), llm.Request{Messages: []llm.Message{{Role: "user", Content: "hi"}}}); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if seenHeader != "canary" {
+		t.Fatalf("X-Gateway-Route = %q, want canary", seenHeader)
+	}
+}
+
 func TestGenerate_Anthropic_MultiBlockToolUse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
