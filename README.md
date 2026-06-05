@@ -44,6 +44,7 @@ go get github.com/costa92/llm-agent-providers/kimi@latest
 - native function/tool calling
 - embeddings
 - image generation (gpt-image / dall-e via `Images.Generate`)
+- vision / image input (gpt-4o / gpt-4.1 / o-series via `Message.Images`)
 
 ### Anthropic
 
@@ -52,6 +53,7 @@ go get github.com/costa92/llm-agent-providers/kimi@latest
 - streaming
 - native tool use
 - documented embedding gap via `llm.ErrNotSupported`
+- vision / image input (Claude 3.x + Claude 4 via `Message.Images`)
 
 ### Ollama
 
@@ -93,6 +95,7 @@ go get github.com/costa92/llm-agent-providers/kimi@latest
 - streaming with usage capture
 - native function/tool calling
 - image generation (Nano Banana inline + Imagen) + embeddings
+- vision / image input (all Gemini chat models via `Message.Images`)
 
 ### Kimi
 
@@ -100,6 +103,7 @@ go get github.com/costa92/llm-agent-providers/kimi@latest
 - sync generate
 - streaming with usage capture
 - native function/tool calling
+- vision / image input (kimi-k2.5 / k2.6 + `moonshot-v1-*-vision-preview` via `Message.Images`)
 - OpenAI-compatible chat + tools; no image generation or embeddings
 
 ### Conformance
