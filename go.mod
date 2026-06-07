@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.41.0
-	github.com/costa92/llm-agent-contract v0.4.0
+	github.com/costa92/llm-agent-contract v0.5.0
 	github.com/ollama/ollama v0.23.2
 	github.com/openai/openai-go/v3 v3.35.0
 	github.com/testcontainers/testcontainers-go/modules/ollama v0.42.0
